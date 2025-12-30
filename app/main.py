@@ -18,6 +18,7 @@ import hashlib
 import uuid
 from collections import deque
 import functools
+from contextlib import suppress
 
 # Rich logging
 from rich.logging import RichHandler
@@ -67,14 +68,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API Key security for admin endpoints
+# API Key security
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key: str = Security(api_key_header)):
     """Verify API key for admin endpoints"""
     expected_key = os.getenv("ADMIN_API_KEY")
     if not expected_key:
-        # If no API key is set, allow localhost only
         return None
     
     if api_key != expected_key:
@@ -90,6 +90,7 @@ except ImportError:
     logger.warning(i18n.get("startup.redis_not_installed"))
 
 SUPPORTED_SITES: List[str] = []
+SUPPORTED_SITES_ETAG: str = ""
 redis_client: Optional[aioredis.Redis] = None
 DENO_VERSION: str = "unknown"
 YTDLP_VERSION: str = "unknown"
@@ -137,7 +138,6 @@ class SecurityValidator:
                 addr_info = socket.getaddrinfo(hostname, None)
                 ips = [info[4][0] for info in addr_info]
             except socket.gaierror:
-                # DNS resolution failed - let yt-dlp handle it
                 return
             
             # Check all resolved IPs
@@ -163,39 +163,71 @@ class SecurityValidator:
             logger.error(f"URL validation failed: {str(e)}")
             raise ValueError(i18n.get("error.invalid_url", reason=str(e)))
 
-class FormatPolicy:
-    """Format selection policy"""
+class DownloadIntent(BaseModel):
+    """Internal download intent (separated from HTTP concerns)"""
+    url: str
+    audio_only: bool
+    audio_format: str
+    quality: Optional[int]
+    custom_format: Optional[str]
+
+class MediaMetadata(BaseModel):
+    """Media metadata separated from format decision"""
+    format_str: str
+    ext: str
+    media_type: str
+    estimated_size: Optional[int] = None
+
+class FormatDecision:
+    """Make format decisions"""
     
     @staticmethod
-    def get_format_string(
-        custom_format: Optional[str],
-        audio_only: bool,
-        audio_format: str,
-        quality: Optional[int]
-    ) -> Tuple[str, str, str]:
-        """
-        Get format string, extension, and MIME type
-        Returns: (format_str, ext, media_type)
-        """
-        if custom_format:
-            return custom_format, 'mp4', 'application/octet-stream'
+    def decide(intent: DownloadIntent) -> str:
+        """Decide format string based on intent"""
+        if intent.custom_format:
+            return intent.custom_format
         
-        if audio_only:
-            if audio_format == "mp3":
-                return 'bestaudio', 'mp3', 'audio/mpeg'
-            elif audio_format == "m4a":
-                return 'bestaudio[ext=m4a]/bestaudio', 'm4a', 'audio/mp4'
+        if intent.audio_only:
+            if intent.audio_format == "mp3":
+                return 'bestaudio'
+            elif intent.audio_format == "m4a":
+                return 'bestaudio[ext=m4a]/bestaudio'
             else:  # opus
-                return 'bestaudio[ext=webm]/bestaudio', 'webm', 'audio/webm'
+                return 'bestaudio[ext=webm]/bestaudio'
         
-        if quality:
-            format_str = (
-                f"bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/"
-                f"best[ext=mp4][height<={quality}]/best"
+        if intent.quality:
+            return (
+                f"bestvideo[ext=mp4][height<={intent.quality}]+bestaudio[ext=m4a]/"
+                f"best[ext=mp4][height<={intent.quality}]/best"
             )
-            return format_str, 'mp4', 'application/octet-stream'
         
-        return config.ytdlp.default_format, 'mp4', 'application/octet-stream'
+        return config.ytdlp.default_format
+    
+    @staticmethod
+    def get_metadata(intent: DownloadIntent) -> MediaMetadata:
+        """Get media metadata based on intent"""
+        format_str = FormatDecision.decide(intent)
+        
+        if intent.custom_format:
+            return MediaMetadata(
+                format_str=format_str,
+                ext='mp4',
+                media_type='application/octet-stream'
+            )
+        
+        if intent.audio_only:
+            if intent.audio_format == "mp3":
+                return MediaMetadata(format_str=format_str, ext='mp3', media_type='audio/mpeg')
+            elif intent.audio_format == "m4a":
+                return MediaMetadata(format_str=format_str, ext='m4a', media_type='audio/mp4')
+            else:
+                return MediaMetadata(format_str=format_str, ext='webm', media_type='audio/webm')
+        
+        return MediaMetadata(
+            format_str=format_str,
+            ext='mp4',
+            media_type='application/octet-stream'
+        )
 
 class YTDLPCommandBuilder:
     """Build yt-dlp commands"""
@@ -246,7 +278,6 @@ class YTDLPCommandBuilder:
         if js_runtime:
             cmd.extend(['--js-runtimes', js_runtime])
         
-        # Only suppress progress, not warnings
         if config.logging.level != "DEBUG":
             cmd.append('--no-progress')
         
@@ -256,12 +287,12 @@ class YTDLPCommandBuilder:
         return cmd
     
     @staticmethod
-    def build_filename_command(url: str, js_runtime: Optional[str]) -> List[str]:
-        """Build command for getting filename"""
+    def build_filesize_command(url: str, format_str: str, js_runtime: Optional[str]) -> List[str]:
+        """Build command for getting approximate filesize"""
         cmd = [
             'yt-dlp',
-            '--print', 'filename',
-            '-o', '%(title)s.%(ext)s',
+            '--print', 'filesize_approx',
+            '-f', format_str,
             '--no-playlist',
         ]
         
@@ -288,6 +319,16 @@ class VideoRequest(BaseModel):
         """SSRF protection"""
         SecurityValidator.validate_url(str(v))
         return v
+    
+    def to_intent(self) -> DownloadIntent:
+        """Convert to download intent"""
+        return DownloadIntent(
+            url=str(self.url),
+            audio_only=self.audio_only,
+            audio_format=self.audio_format,
+            quality=self.quality,
+            custom_format=self.format
+        )
 
 class VideoInfo(BaseModel):
     title: str
@@ -319,7 +360,13 @@ def safe_url_for_log(url: str) -> str:
     """Safe URL for logging"""
     try:
         parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        
+        # In DEBUG mode, include query for debugging
+        if config.logging.level == "DEBUG" and parsed.query:
+            return f"{base_url}?..."
+        
+        return base_url
     except:
         return "invalid_url"
 
@@ -391,21 +438,48 @@ class RedisRateLimiter:
             return True
 
 class ConcurrencyLimiter:
-    """Concurrent download limiter with TTL"""
+    """Concurrent download limiter with atomic operations"""
+    
+    def __init__(self):
+        # Lua script for atomic check and increment
+        self.lua_script = """
+        local counter_key = KEYS[1]
+        local slot_key = KEYS[2]
+        local limit = tonumber(ARGV[1])
+        local ttl = tonumber(ARGV[2])
+        
+        local current = tonumber(redis.call('GET', counter_key) or "0")
+        if current >= limit then
+            return 0
+        end
+        
+        redis.call('INCR', counter_key)
+        redis.call('SETEX', slot_key, ttl, "1")
+        
+        return 1
+        """
     
     async def __call__(self, request: Request):
         if not REDIS_AVAILABLE or redis_client is None:
             return True
         
         request_id = str(uuid.uuid4())
-        key = f"active_download:{request_id}"
-        global_key = "active_downloads_count"
+        counter_key = "active_downloads_count"
+        slot_key = f"active_download:{request_id}"
+        ttl = config.download.timeout_seconds + 60
         
         try:
-            # Check current count
-            current = int(await redis_client.get(global_key) or 0)
+            # Atomic check and increment
+            allowed = await redis_client.eval(
+                self.lua_script,
+                2,
+                counter_key,
+                slot_key,
+                config.download.max_concurrent,
+                ttl
+            )
             
-            if current >= config.download.max_concurrent:
+            if not allowed:
                 locale = get_locale(request.headers.get("accept-language"))
                 _ = get_i18n(locale)
                 raise HTTPException(
@@ -413,13 +487,7 @@ class ConcurrencyLimiter:
                     detail=_("error.server_busy", max=config.download.max_concurrent)
                 )
             
-            # Register this download with TTL (auto-cleanup after timeout)
-            ttl = config.download.timeout_seconds + 60  # Add buffer
-            await redis_client.setex(key, ttl, "1")
-            await redis_client.incr(global_key)
-            
-            # Store for cleanup
-            request.state.download_slot_key = key
+            request.state.download_slot_key = slot_key
             request.state.download_slot_acquired = True
             
             return True
@@ -439,9 +507,7 @@ async def release_download_slot(request: Request):
     
     if redis_client and hasattr(request.state, 'download_slot_key'):
         try:
-            # Delete individual key
             await redis_client.delete(request.state.download_slot_key)
-            # Decrement global counter
             await redis_client.decr("active_downloads_count")
         except Exception as e:
             logger.error(i18n.get("log.slot_release_failed", error=str(e)))
@@ -504,8 +570,8 @@ async def check_deno_installation() -> Dict[str, str]:
         }
 
 async def load_supported_sites():
-    """Load supported sites (with Redis cache)"""
-    global SUPPORTED_SITES
+    """Load supported sites with Redis cache and ETag"""
+    global SUPPORTED_SITES, SUPPORTED_SITES_ETAG
     
     # Try Redis cache first
     if redis_client:
@@ -513,6 +579,7 @@ async def load_supported_sites():
             cached = await redis_client.get("supported_sites:cache")
             if cached:
                 SUPPORTED_SITES = json.loads(cached)
+                SUPPORTED_SITES_ETAG = hashlib.sha256(cached.encode()).hexdigest()[:16]
                 console.print(f"[green]Loaded {len(SUPPORTED_SITES)} sites from cache[/green]")
                 logger.info(f"Loaded {len(SUPPORTED_SITES)} extractors from cache")
                 return
@@ -529,14 +596,13 @@ async def load_supported_sites():
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15.0)
         SUPPORTED_SITES = stdout.decode().strip().split('\n')
         
+        sites_json = json.dumps(SUPPORTED_SITES)
+        SUPPORTED_SITES_ETAG = hashlib.sha256(sites_json.encode()).hexdigest()[:16]
+        
         # Cache in Redis (1 day TTL)
         if redis_client:
             try:
-                await redis_client.setex(
-                    "supported_sites:cache",
-                    86400,
-                    json.dumps(SUPPORTED_SITES)
-                )
+                await redis_client.setex("supported_sites:cache", 86400, sites_json)
             except Exception as e:
                 logger.warning(f"Failed to cache in Redis: {str(e)}")
         
@@ -545,6 +611,42 @@ async def load_supported_sites():
     except Exception as e:
         console.print(f"[yellow]{i18n.get('startup.sites_failed')}[/yellow]")
         logger.warning(i18n.get("log.extractor_load_failed", error=str(e)))
+
+async def recover_active_downloads():
+    """Recover active downloads counter from individual keys"""
+    if not redis_client:
+        return
+    
+    try:
+        # Scan for active download keys
+        keys = []
+        cursor = 0
+        while True:
+            cursor, partial_keys = await redis_client.scan(
+                cursor,
+                match="active_download:*",
+                count=100
+            )
+            keys.extend(partial_keys)
+            if cursor == 0:
+                break
+        
+        # Set counter to actual count
+        await redis_client.set("active_downloads_count", len(keys))
+        
+        if len(keys) > 0:
+            console.print(f"[yellow]Recovered {len(keys)} active downloads[/yellow]")
+            logger.info(f"Recovered {len(keys)} active download slots")
+        else:
+            console.print(f"[green]Active downloads counter initialized to 0[/green]")
+            
+    except Exception as e:
+        logger.error(f"Failed to recover active downloads: {str(e)}")
+        # Fallback: reset to 0
+        try:
+            await redis_client.set("active_downloads_count", 0)
+        except:
+            pass
 
 @app.on_event("startup")
 async def startup_event():
@@ -605,9 +707,10 @@ async def startup_event():
             )
             await redis_client.ping()
             
-            # Recovery: reset active downloads counter on startup
-            await redis_client.set("active_downloads_count", 0)
-            console.print(f"[green]{i18n.get('startup.redis_connected')} (counter reset)[/green]")
+            # Recover active downloads counter from individual keys
+            await recover_active_downloads()
+            
+            console.print(f"[green]{i18n.get('startup.redis_connected')}[/green]")
             logger.info(i18n.get("startup.redis_connected"))
         except Exception as e:
             console.print(f"[yellow]{i18n.get('startup.redis_failed', error=str(e))}[/yellow]")
@@ -763,6 +866,13 @@ async def get_video_info(request: Request, video_request: VideoRequest):
         
         logger.info(_("log.info_retrieved", title=info.get('title', 'Unknown')))
         
+        # Sort formats by quality (height and filesize)
+        formats = sorted(
+            info.get("formats", []),
+            key=lambda f: (f.get("height") or 0, f.get("filesize") or 0),
+            reverse=True
+        )[:20]
+        
         return VideoInfo(
             title=info.get("title", "Unknown"),
             duration=info.get("duration"),
@@ -777,7 +887,7 @@ async def get_video_info(request: Request, video_request: VideoRequest):
                     "vcodec": f.get("vcodec"),
                     "acodec": f.get("acodec"),
                 }
-                for f in info.get("formats", [])[:20]
+                for f in formats
             ],
             thumbnail=info.get("thumbnail"),
             uploader=info.get("uploader"),
@@ -801,28 +911,51 @@ async def stream_video(request: Request, video_request: VideoRequest):
     locale = get_locale(request.headers.get("accept-language"))
     _ = get_i18n(locale)
     
-    # Get format details
-    format_str, ext, media_type = FormatPolicy.get_format_string(
-        video_request.format,
-        video_request.audio_only,
-        video_request.audio_format,
-        video_request.quality
-    )
+    # Convert to intent and get metadata
+    intent = video_request.to_intent()
+    metadata = FormatDecision.get_metadata(intent)
     
-    # Generate simple filename (avoid extra yt-dlp call)
-    video_id = hashlib.md5(str(video_request.url).encode()).hexdigest()[:8]
-    filename = f"video_{video_id}.{ext}"
+    # Generate simple filename
+    video_id = hashlib.md5(intent.url.encode()).hexdigest()[:8]
+    filename = f"video_{video_id}.{metadata.ext}"
+    
+    # Try to get approximate filesize for Content-Length header
+    content_length = None
+    try:
+        size_cmd = YTDLPCommandBuilder.build_filesize_command(
+            intent.url,
+            metadata.format_str,
+            JS_RUNTIME_PATH
+        )
+        
+        size_process = await asyncio.create_subprocess_exec(
+            *size_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL
+        )
+        
+        stdout, _ = await asyncio.wait_for(size_process.communicate(), timeout=10.0)
+        
+        if size_process.returncode == 0:
+            size_str = stdout.decode().strip()
+            try:
+                content_length = int(size_str)
+            except:
+                pass
+    except Exception as e:
+        logger.debug(f"Failed to get filesize: {str(e)}")
     
     cmd = YTDLPCommandBuilder.build_stream_command(
-        str(video_request.url),
-        format_str,
+        intent.url,
+        metadata.format_str,
         JS_RUNTIME_PATH,
-        video_request.audio_only,
-        video_request.audio_format
+        intent.audio_only,
+        intent.audio_format
     )
     
-    safe_url = safe_url_for_log(str(video_request.url))
-    logger.info(_("log.starting_stream", url=safe_url, format=format_str))
+    safe_url = safe_url_for_log(intent.url)
+    logger.info(_("log.starting_stream", url=safe_url, format=metadata.format_str))
     
     process = None
     
@@ -834,7 +967,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        stderr_lines = deque(maxlen=50)  # Keep only last 50 lines
+        stderr_lines = deque(maxlen=50)
         
         async def drain_stderr():
             """Drain stderr to prevent buffer deadlock"""
@@ -887,10 +1020,8 @@ async def stream_video(request: Request, video_request: VideoRequest):
                     await process.wait()
                 
                 stderr_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await stderr_task
-                except asyncio.CancelledError:
-                    pass
                 
                 await release_download_slot(request)
         
@@ -900,9 +1031,13 @@ async def stream_video(request: Request, video_request: VideoRequest):
             'Cache-Control': 'no-cache',
         }
         
+        # Add Content-Length if available
+        if content_length:
+            headers['Content-Length'] = str(content_length)
+        
         return StreamingResponse(
             generate(),
-            media_type=media_type,
+            media_type=metadata.media_type,
             headers=headers
         )
         
@@ -918,10 +1053,16 @@ async def stream_video(request: Request, video_request: VideoRequest):
 
 @app.get("/supported-sites", tags=["Info"])
 async def get_supported_sites(
+    request: Request,
     limit: int = 50,
     search: Optional[str] = None
 ):
-    """Get supported sites list"""
+    """Get supported sites list with ETag support"""
+    
+    # Check ETag
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == f'"{SUPPORTED_SITES_ETAG}"':
+        return JSONResponse(status_code=304, content={})
     
     sites = SUPPORTED_SITES
     
@@ -929,12 +1070,19 @@ async def get_supported_sites(
         search_lower = search.lower()
         sites = [s for s in sites if search_lower in s.lower()]
     
-    return {
-        "count": len(sites),
-        "total": len(SUPPORTED_SITES),
-        "sites": sites[:limit],
-        "cache_control": "max-age=3600"
-    }
+    response = JSONResponse(
+        content={
+            "count": len(sites),
+            "total": len(SUPPORTED_SITES),
+            "sites": sites[:limit]
+        },
+        headers={
+            "ETag": f'"{SUPPORTED_SITES_ETAG}"',
+            "Cache-Control": "public, max-age=3600"
+        }
+    )
+    
+    return response
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
