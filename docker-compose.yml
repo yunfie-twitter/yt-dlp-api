@@ -1,7 +1,6 @@
 version: '3.9'
 
 services:
-  # FastAPI アプリケーション
   api:
     build:
       context: .
@@ -9,12 +8,7 @@ services:
     container_name: ytdlp-api
     restart: unless-stopped
     environment:
-      - REDIS_URL=redis://redis:6379
-      - RATE_LIMIT_REQUESTS=5
-      - RATE_LIMIT_WINDOW=60
-      - LOG_LEVEL=INFO
-      - YT_DLP_JS_RUNTIME=deno:/usr/local/bin/deno
-      - DENO_DIR=/home/appuser/.cache/deno
+      - CONFIG_PATH=/app/config.json
     ports:
       - "8000:8000"
     depends_on:
@@ -23,7 +17,7 @@ services:
     networks:
       - backend
     volumes:
-      # Denoキャッシュを永続化（オプション）
+      - ./config.json:/app/config.json:ro
       - deno_cache:/home/appuser/.cache/deno
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -32,7 +26,6 @@ services:
       retries: 3
       start_period: 10s
 
-  # Redis
   redis:
     image: redis:7-alpine
     container_name: ytdlp-redis
@@ -51,15 +44,10 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    ports:
-      - "6379:6379"  # 開発用（本番では削除推奨）
 
 volumes:
   redis_data:
-    driver: local
   deno_cache:
-    driver: local
 
 networks:
   backend:
-    driver: bridge
