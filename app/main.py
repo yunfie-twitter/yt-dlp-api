@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, Field, validator
@@ -15,10 +15,13 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-# rich ロギング設定
+# Rich logging
 from rich.logging import RichHandler
 from rich.console import Console
 import logging
+
+# i18n
+from i18n import i18n
 
 console = Console()
 
@@ -30,16 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 設定クラス
+# Settings
 class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379"
     rate_limit_requests: int = 5
     rate_limit_window: int = 60
     max_concurrent_downloads: int = 10
-    max_download_timeout: int = 3600  # 1時間
+    max_download_timeout: int = 3600
     log_level: str = "INFO"
-    yt_dlp_js_runtime: Optional[str] = None  # 自動検出
+    yt_dlp_js_runtime: Optional[str] = None
     enable_ssrf_protection: bool = True
+    default_locale: str = "en"
     
     class Config:
         env_file = ".env"
@@ -47,13 +51,15 @@ class Settings(BaseSettings):
 settings = Settings()
 logging.getLogger().setLevel(getattr(logging, settings.log_level))
 
+# Update i18n default locale
+i18n.default_locale = settings.default_locale
+
 app = FastAPI(
-    title="yt-dlp Streaming API with Deno",
-    description="本番環境対応 yt-dlp ストリーミングAPI",
-    version="4.0.0"
+    title=i18n.get("api.title"),
+    description=i18n.get("api.description"),
+    version=i18n.get("api.version")
 )
 
-# CORS設定（必要に応じて）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -62,13 +68,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Redis接続
+# Redis
 try:
     import redis.asyncio as aioredis
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
-    logger.warning("redis not installed - rate limiting disabled")
+    logger.warning(i18n.get("startup.redis_not_installed"))
 
 SUPPORTED_SITES: List[str] = []
 redis_client: Optional[aioredis.Redis] = None
@@ -76,16 +82,35 @@ DENO_VERSION: str = "unknown"
 YTDLP_VERSION: str = "unknown"
 JS_RUNTIME_PATH: Optional[str] = None
 
+def get_locale(accept_language: Optional[str] = None) -> str:
+    """Extract locale from Accept-Language header"""
+    if not accept_language:
+        return settings.default_locale
+    
+    # Parse Accept-Language header (e.g., "en-US,en;q=0.9,ja;q=0.8")
+    languages = []
+    for lang in accept_language.split(","):
+        parts = lang.strip().split(";")
+        locale = parts[0].split("-")[0]  # Extract main language code
+        languages.append(locale)
+    
+    # Return first supported locale
+    for locale in languages:
+        if locale in i18n.translations:
+            return locale
+    
+    return settings.default_locale
+
 class VideoRequest(BaseModel):
-    url: HttpUrl = Field(..., description="動画のURL")
-    format: Optional[str] = Field(None, description="カスタムフォーマット指定")
-    audio_only: Optional[bool] = Field(False, description="音声のみダウンロード")
-    audio_format: Optional[str] = Field("opus", description="音声フォーマット (opus/m4a/mp3)")
-    quality: Optional[int] = Field(None, description="画質指定", ge=144, le=2160)
+    url: HttpUrl = Field(..., description="Video URL")
+    format: Optional[str] = Field(None, description="Custom format specification")
+    audio_only: Optional[bool] = Field(False, description="Download audio only")
+    audio_format: Optional[str] = Field("opus", description="Audio format (opus/m4a/mp3)")
+    quality: Optional[int] = Field(None, description="Video quality", ge=144, le=2160)
     
     @validator('url')
     def validate_url_safety(cls, v):
-        """SSRF対策: 内部IPへのアクセスを防ぐ"""
+        """SSRF protection: prevent access to internal IPs"""
         if not settings.enable_ssrf_protection:
             return v
         
@@ -96,25 +121,25 @@ class VideoRequest(BaseModel):
             if not hostname:
                 raise ValueError("Invalid URL")
             
-            # IPアドレスの場合は直接チェック
+            # Check if IP address
             try:
                 ip = ipaddress.ip_address(hostname)
                 if ip.is_private or ip.is_loopback or ip.is_link_local:
-                    raise ValueError("Access to private/internal IPs is forbidden")
+                    raise ValueError(i18n.get("error.private_ip"))
             except ValueError:
-                # ホスト名の場合はDNS解決してチェック
+                # Hostname - resolve and check
                 try:
                     resolved_ip = socket.gethostbyname(hostname)
                     ip = ipaddress.ip_address(resolved_ip)
                     if ip.is_private or ip.is_loopback or ip.is_link_local:
-                        raise ValueError("URL resolves to private/internal IP")
+                        raise ValueError(i18n.get("error.ip_resolves_private"))
                 except socket.gaierror:
-                    pass  # DNS解決失敗は許容（外部サービスが処理）
+                    pass
             
             return v
         except Exception as e:
             logger.error(f"URL validation failed: {str(e)}")
-            raise ValueError(f"Invalid or unsafe URL: {str(e)}")
+            raise ValueError(i18n.get("error.invalid_url", reason=str(e)))
 
 class VideoInfo(BaseModel):
     title: str
@@ -128,7 +153,7 @@ class VideoInfo(BaseModel):
     is_live: bool = False
 
 def sanitize_filename(name: str, max_length: int = 200) -> str:
-    """ファイル名を安全な形式に変換"""
+    """Sanitize filename for safe storage"""
     name = unicodedata.normalize("NFKC", name)
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     
@@ -143,7 +168,7 @@ def sanitize_filename(name: str, max_length: int = 200) -> str:
     return name[:max_length].strip()
 
 def safe_url_for_log(url: str) -> str:
-    """ログ用に安全なURL（トークン等を削除）"""
+    """Safe URL for logging (remove tokens)"""
     try:
         parsed = urlparse(url)
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
@@ -151,13 +176,12 @@ def safe_url_for_log(url: str) -> str:
         return "invalid_url"
 
 class RedisRateLimiter:
-    """Redisベースのレート制限（Lua script使用）"""
+    """Redis-based rate limiter with Lua script"""
     
     def __init__(self):
         self.max_requests = settings.rate_limit_requests
         self.window_seconds = settings.rate_limit_window
         
-        # Lua script for atomic increment with expiry
         self.lua_script = """
         local key = KEYS[1]
         local limit = tonumber(ARGV[1])
@@ -184,11 +208,9 @@ class RedisRateLimiter:
         endpoint = request.url.path
         user_agent_hash = hash(request.headers.get("user-agent", ""))
         
-        # キーを IP + endpoint + UA で構成
         key = f"rate:{client_ip}:{endpoint}:{user_agent_hash % 10000}"
         
         try:
-            # Lua scriptを実行
             result = await redis_client.eval(
                 self.lua_script,
                 1,
@@ -200,9 +222,10 @@ class RedisRateLimiter:
             allowed, ttl = result
             
             if not allowed:
+                locale = get_locale(request.headers.get("accept-language"))
                 raise HTTPException(
                     status_code=429,
-                    detail=f"Rate limit exceeded. Retry after {ttl} seconds.",
+                    detail=i18n.get("error.rate_limit", locale=locale, seconds=ttl),
                     headers={"Retry-After": str(ttl)}
                 )
             
@@ -210,11 +233,11 @@ class RedisRateLimiter:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Redis rate limit error: {str(e)}")
+            logger.error(i18n.get("log.redis_rate_limit_error", error=str(e)))
             return True
 
 class ConcurrencyLimiter:
-    """同時ダウンロード数制御"""
+    """Concurrent download limiter"""
     
     async def __call__(self, request: Request):
         if not REDIS_AVAILABLE or redis_client is None:
@@ -227,35 +250,35 @@ class ConcurrencyLimiter:
             
             if current > settings.max_concurrent_downloads:
                 await redis_client.decr(key)
+                locale = get_locale(request.headers.get("accept-language"))
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Server busy. Max concurrent downloads: {settings.max_concurrent_downloads}"
+                    detail=i18n.get("error.server_busy", locale=locale, max=settings.max_concurrent_downloads)
                 )
             
-            # リクエストが終了したらデクリメント
             request.state.download_slot_acquired = True
             
             return True
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Concurrency limiter error: {str(e)}")
+            logger.error(i18n.get("log.concurrency_error", error=str(e)))
             return True
 
 rate_limiter = RedisRateLimiter()
 concurrency_limiter = ConcurrencyLimiter()
 
 async def release_download_slot(request: Request):
-    """ダウンロードスロットを解放"""
+    """Release download slot"""
     if hasattr(request.state, 'download_slot_acquired') and request.state.download_slot_acquired:
         if redis_client:
             try:
                 await redis_client.decr("active_downloads")
             except Exception as e:
-                logger.error(f"Failed to release download slot: {str(e)}")
+                logger.error(i18n.get("log.slot_release_failed", error=str(e)))
 
 async def detect_js_runtime() -> Optional[str]:
-    """JSランタイムを自動検出"""
+    """Auto-detect JS runtime"""
     runtimes = [
         ("deno", "/usr/local/bin/deno"),
         ("deno", "/usr/bin/deno"),
@@ -273,7 +296,7 @@ async def detect_js_runtime() -> Optional[str]:
                 )
                 await asyncio.wait_for(process.communicate(), timeout=3.0)
                 if process.returncode == 0:
-                    logger.info(f"Detected JS runtime: {runtime_name} at {runtime_path}")
+                    logger.info(i18n.get("log.js_runtime_detected", name=runtime_name, path=runtime_path))
                     return f"{runtime_name}:{runtime_path}"
             except:
                 pass
@@ -281,7 +304,7 @@ async def detect_js_runtime() -> Optional[str]:
     return None
 
 async def check_deno_installation() -> Dict[str, str]:
-    """Denoのインストール状態を確認"""
+    """Check Deno installation status"""
     try:
         process = await asyncio.create_subprocess_exec(
             'deno', '--version',
@@ -298,18 +321,18 @@ async def check_deno_installation() -> Dict[str, str]:
                 break
         
         return {
-            "status": "installed",
+            "status": i18n.get("response.deno_installed"),
             "version": deno_version,
             "path": "/usr/local/bin/deno"
         }
     except Exception as e:
         return {
-            "status": "not_found",
+            "status": i18n.get("response.deno_not_found"),
             "error": str(e)
         }
 
 async def load_supported_sites():
-    """サポートサイトをバックグラウンドで読み込み"""
+    """Load supported sites in background"""
     global SUPPORTED_SITES
     
     try:
@@ -320,37 +343,37 @@ async def load_supported_sites():
         )
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15.0)
         SUPPORTED_SITES = stdout.decode().strip().split('\n')
-        console.print(f"[green]Cached {len(SUPPORTED_SITES)} supported sites[/green]")
-        logger.info(f"Loaded {len(SUPPORTED_SITES)} supported extractors")
+        console.print(f"[green]{i18n.get('startup.sites_cached', count=len(SUPPORTED_SITES))}[/green]")
+        logger.info(i18n.get("startup.sites_cached", count=len(SUPPORTED_SITES)))
     except Exception as e:
-        console.print("[yellow]Failed to load supported sites (non-critical)[/yellow]")
-        logger.warning(f"Extractor list loading failed: {str(e)}")
+        console.print(f"[yellow]{i18n.get('startup.sites_failed')}[/yellow]")
+        logger.warning(i18n.get("log.extractor_load_failed", error=str(e)))
 
 @app.on_event("startup")
 async def startup_event():
-    """起動時処理"""
+    """Startup handler"""
     global redis_client, DENO_VERSION, YTDLP_VERSION, JS_RUNTIME_PATH
     
-    console.rule("[bold blue]Starting yt-dlp API v4.0[/bold blue]")
+    console.rule(f"[bold blue]{i18n.get('startup.api_ready')}[/bold blue]")
     
-    # JSランタイム自動検出
+    # JS runtime detection
     if settings.yt_dlp_js_runtime:
         JS_RUNTIME_PATH = settings.yt_dlp_js_runtime
-        console.print(f"[cyan]Using configured JS runtime: {JS_RUNTIME_PATH}[/cyan]")
+        console.print(f"[cyan]{i18n.get('startup.js_runtime_configured', runtime=JS_RUNTIME_PATH)}[/cyan]")
     else:
         JS_RUNTIME_PATH = await detect_js_runtime()
         if JS_RUNTIME_PATH:
-            console.print(f"[green]Auto-detected JS runtime: {JS_RUNTIME_PATH}[/green]")
+            console.print(f"[green]{i18n.get('startup.js_runtime_detected', runtime=JS_RUNTIME_PATH)}[/green]")
         else:
-            console.print("[yellow]No JS runtime detected (YouTube may fail)[/yellow]")
+            console.print(f"[yellow]{i18n.get('startup.js_runtime_none')}[/yellow]")
     
-    # Denoバージョン確認
+    # Deno check
     deno_info = await check_deno_installation()
-    if deno_info["status"] == "installed":
+    if deno_info["status"] == i18n.get("response.deno_installed"):
         DENO_VERSION = deno_info["version"]
-        console.print(f"[green]Deno {DENO_VERSION} detected[/green]")
+        console.print(f"[green]{i18n.get('startup.deno_detected', version=DENO_VERSION)}[/green]")
     
-    # yt-dlpバージョン確認
+    # yt-dlp check
     try:
         process = await asyncio.create_subprocess_exec(
             'yt-dlp', '--version',
@@ -359,12 +382,12 @@ async def startup_event():
         )
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
         YTDLP_VERSION = stdout.decode().strip()
-        console.print(f"[green]yt-dlp {YTDLP_VERSION} detected[/green]")
+        console.print(f"[green]{i18n.get('startup.ytdlp_detected', version=YTDLP_VERSION)}[/green]")
     except Exception as e:
-        console.print("[red]yt-dlp version check failed[/red]")
-        logger.error(f"yt-dlp version check failed: {str(e)}")
+        console.print(f"[red]{i18n.get('startup.ytdlp_failed')}[/red]")
+        logger.error(i18n.get("startup.ytdlp_failed"))
     
-    # Redis接続
+    # Redis connection
     if REDIS_AVAILABLE:
         try:
             redis_client = await aioredis.from_url(
@@ -374,36 +397,36 @@ async def startup_event():
                 socket_connect_timeout=5
             )
             await redis_client.ping()
-            console.print(f"[green]Redis connected[/green]")
-            logger.info("Redis connection successful")
+            console.print(f"[green]{i18n.get('startup.redis_connected')}[/green]")
+            logger.info(i18n.get("startup.redis_connected"))
         except Exception as e:
-            console.print(f"[yellow]Redis unavailable: {str(e)}[/yellow]")
-            logger.warning(f"Redis connection failed: {str(e)}")
+            console.print(f"[yellow]{i18n.get('startup.redis_failed', error=str(e))}[/yellow]")
+            logger.warning(i18n.get("startup.redis_failed", error=str(e)))
             redis_client = None
     
-    # サポートサイトをバックグラウンドで読み込み
+    # Load supported sites in background
     asyncio.create_task(load_supported_sites())
     
-    console.rule("[bold green]API Ready[/bold green]")
-    console.print(f"[cyan]Max concurrent downloads: {settings.max_concurrent_downloads}[/cyan]")
-    console.print(f"[cyan]Download timeout: {settings.max_download_timeout}s[/cyan]")
-    console.print(f"[cyan]SSRF protection: {settings.enable_ssrf_protection}[/cyan]")
+    console.rule(f"[bold green]{i18n.get('startup.api_ready')}[/bold green]")
+    console.print(f"[cyan]{i18n.get('startup.max_downloads', count=settings.max_concurrent_downloads)}[/cyan]")
+    console.print(f"[cyan]{i18n.get('startup.download_timeout', seconds=settings.max_download_timeout)}[/cyan]")
+    console.print(f"[cyan]{i18n.get('startup.ssrf_protection', enabled=settings.enable_ssrf_protection)}[/cyan]")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """シャットダウン処理"""
-    console.rule("[bold yellow]Shutting down[/bold yellow]")
+    """Shutdown handler"""
+    console.rule(f"[bold yellow]{i18n.get('shutdown.closing')}[/bold yellow]")
     
     if redis_client:
         await redis_client.close()
-        logger.info("Redis connection closed")
+        logger.info(i18n.get("shutdown.redis_closed"))
 
 @app.get("/", tags=["Health"])
 async def root():
     return {
-        "status": "running",
-        "service": "yt-dlp Streaming API",
-        "version": "4.0.0",
+        "status": i18n.get("response.status_running"),
+        "service": i18n.get("api.title"),
+        "version": i18n.get("api.version"),
         "deno_version": DENO_VERSION,
         "ytdlp_version": YTDLP_VERSION,
         "redis_enabled": redis_client is not None,
@@ -412,25 +435,25 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """軽量ヘルスチェック（Kubernetes向け）"""
-    redis_status = "disabled"
+    """Lightweight health check for Kubernetes"""
+    redis_status = i18n.get("response.redis_disabled")
     if redis_client:
         try:
             await redis_client.ping()
-            redis_status = "connected"
+            redis_status = i18n.get("response.redis_connected")
         except:
-            redis_status = "disconnected"
+            redis_status = i18n.get("response.redis_disconnected")
     
     return {
-        "status": "healthy",
+        "status": i18n.get("health.status"),
         "redis": redis_status
     }
 
 @app.get("/health/full", tags=["Health"])
 async def health_check_full():
-    """詳細ヘルスチェック"""
+    """Detailed health check"""
     
-    # yt-dlpチェック
+    # yt-dlp check
     try:
         process = await asyncio.create_subprocess_exec(
             'yt-dlp', '--version',
@@ -440,24 +463,24 @@ async def health_check_full():
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
         ytdlp_version = stdout.decode().strip()
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"yt-dlp unavailable: {str(e)}")
+        raise HTTPException(status_code=503, detail=i18n.get("error.ytdlp_unavailable", reason=str(e)))
     
-    # Denoチェック
+    # Deno check
     deno_info = await check_deno_installation()
     
-    # Redisチェック
-    redis_status = "disabled"
+    # Redis check
+    redis_status = i18n.get("response.redis_disabled")
     active_downloads = 0
     if redis_client:
         try:
             await redis_client.ping()
-            redis_status = "connected"
+            redis_status = i18n.get("response.redis_connected")
             active_downloads = int(await redis_client.get("active_downloads") or 0)
         except:
-            redis_status = "disconnected"
+            redis_status = i18n.get("response.redis_disconnected")
     
     health_data = {
-        "status": "healthy",
+        "status": i18n.get("health.status"),
         "ytdlp_version": ytdlp_version,
         "deno": deno_info,
         "redis_status": redis_status,
@@ -467,20 +490,22 @@ async def health_check_full():
         "supported_sites_loaded": len(SUPPORTED_SITES)
     }
     
-    if deno_info["status"] != "installed":
-        health_data["warning"] = "Deno not installed. YouTube downloads may fail."
+    if deno_info["status"] != i18n.get("response.deno_installed"):
+        health_data["warning"] = i18n.get("health.warning_no_deno")
     
     return health_data
 
 @app.post("/info", response_model=VideoInfo, tags=["Video Info"], dependencies=[Depends(rate_limiter)])
-async def get_video_info(request: VideoRequest):
-    """動画情報取得"""
+async def get_video_info(request: Request, video_request: VideoRequest):
+    """Get video information"""
+    
+    locale = get_locale(request.headers.get("accept-language"))
     
     cmd = [
         'yt-dlp',
         '--dump-json',
         '--no-playlist',
-        '--match-filter', '!is_live',  # ライブ配信を除外
+        '--match-filter', '!is_live',
         '--socket-timeout', '10',
         '--retries', '3',
     ]
@@ -488,10 +513,10 @@ async def get_video_info(request: VideoRequest):
     if JS_RUNTIME_PATH:
         cmd.extend(['--js-runtimes', JS_RUNTIME_PATH])
     
-    cmd.append(str(request.url))
+    cmd.append(str(video_request.url))
     
-    safe_url = safe_url_for_log(str(request.url))
-    logger.info(f"Fetching video info: {safe_url}")
+    safe_url = safe_url_for_log(str(video_request.url))
+    logger.info(i18n.get("log.fetching_info", url=safe_url))
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -506,22 +531,21 @@ async def get_video_info(request: VideoRequest):
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            logger.error("Video info fetch timeout")
-            raise HTTPException(status_code=504, detail="Request timeout")
+            logger.error(i18n.get("log.info_timeout"))
+            raise HTTPException(status_code=504, detail=i18n.get("error.timeout", locale=locale))
         
         if process.returncode != 0:
             error_msg = stderr.decode().strip()
-            logger.error(f"yt-dlp error (code {process.returncode}): {error_msg}")
-            raise HTTPException(status_code=400, detail=f"Failed to fetch video info: {error_msg[:200]}")
+            logger.error(i18n.get("log.ytdlp_error", code=process.returncode, message=error_msg))
+            raise HTTPException(status_code=400, detail=i18n.get("error.fetch_info_failed", locale=locale, reason=error_msg[:200]))
         
         info = json.loads(stdout.decode())
         
-        # ライブ配信チェック
         is_live = info.get('is_live', False)
         if is_live:
-            raise HTTPException(status_code=400, detail="Live streams are not supported")
+            raise HTTPException(status_code=400, detail=i18n.get("error.live_not_supported", locale=locale))
         
-        logger.info(f"Video info retrieved: {info.get('title', 'Unknown')}")
+        logger.info(i18n.get("log.info_retrieved", title=info.get('title', 'Unknown')))
         
         return VideoInfo(
             title=info.get("title", "Unknown"),
@@ -541,13 +565,13 @@ async def get_video_info(request: VideoRequest):
             ],
             thumbnail=info.get("thumbnail"),
             uploader=info.get("uploader"),
-            webpage_url=info.get("webpage_url", str(request.url)),
+            webpage_url=info.get("webpage_url", str(video_request.url)),
             is_live=is_live
         )
         
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to parse video info")
+        logger.error(i18n.get("log.json_parse_error", error=str(e)))
+        raise HTTPException(status_code=500, detail=i18n.get("error.parse_failed", locale=locale))
     except HTTPException:
         raise
     except Exception as e:
@@ -556,9 +580,11 @@ async def get_video_info(request: VideoRequest):
 
 @app.post("/stream", tags=["Download"], dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
 async def stream_video(request: Request, video_request: VideoRequest):
-    """ストリーミングダウンロード（改善版 - 二重アクセス解消）"""
+    """Stream video download"""
     
-    # フォーマット構築
+    locale = get_locale(request.headers.get("accept-language"))
+    
+    # Format selection
     if video_request.format:
         format_str = video_request.format
         ext = 'mp4'
@@ -572,7 +598,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
             format_str = 'bestaudio[ext=m4a]/bestaudio'
             ext = 'm4a'
             media_type = 'audio/mp4'
-        else:  # opus (default)
+        else:
             format_str = 'bestaudio[ext=webm]/bestaudio'
             ext = 'webm'
             media_type = 'audio/webm'
@@ -589,8 +615,8 @@ async def stream_video(request: Request, video_request: VideoRequest):
         ext = 'mp4'
         media_type = 'application/octet-stream'
     
-    # ファイル名を --print で取得（軽量・単発）
-    filename = f"video.{ext}"  # デフォルト
+    # Get filename with --print
+    filename = f"video.{ext}"
     
     try:
         filename_cmd = [
@@ -616,11 +642,10 @@ async def stream_video(request: Request, video_request: VideoRequest):
         
         if filename_process.returncode == 0:
             raw_filename = stdout.decode().strip()
-            # 拡張子を調整
             title = os.path.splitext(raw_filename)[0]
             filename = f"{sanitize_filename(title)}.{ext}"
     except Exception as e:
-        logger.warning(f"Failed to get filename: {str(e)} - using default")
+        logger.warning(i18n.get("log.filename_failed", error=str(e)))
     
     cmd = [
         'yt-dlp',
@@ -636,7 +661,6 @@ async def stream_video(request: Request, video_request: VideoRequest):
     if JS_RUNTIME_PATH:
         cmd.extend(['--js-runtimes', JS_RUNTIME_PATH])
     
-    # DEBUGモードでは詳細ログ
     if settings.log_level != "DEBUG":
         cmd.extend(['--quiet', '--no-warnings'])
     
@@ -644,7 +668,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
         cmd.extend(['-x', '--audio-format', 'mp3'])
     
     safe_url = safe_url_for_log(str(video_request.url))
-    logger.info(f"Starting stream: {safe_url} (format: {format_str})")
+    logger.info(i18n.get("log.starting_stream", url=safe_url, format=format_str))
     
     process = None
     
@@ -659,7 +683,6 @@ async def stream_video(request: Request, video_request: VideoRequest):
         stderr_lines = []
         
         async def drain_stderr():
-            """stderrドレイン（エラー時に出力）"""
             try:
                 while True:
                     line = await process.stderr.readline()
@@ -675,7 +698,6 @@ async def stream_video(request: Request, video_request: VideoRequest):
         stderr_task = asyncio.create_task(drain_stderr())
         
         async def generate():
-            """ストリーム生成"""
             CHUNK_SIZE = 1024 * 1024
             try:
                 while True:
@@ -684,38 +706,34 @@ async def stream_video(request: Request, video_request: VideoRequest):
                         break
                     yield chunk
             except asyncio.CancelledError:
-                logger.warning(f"Client disconnected: PID={process.pid}")
+                logger.warning(i18n.get("log.client_disconnected", pid=process.pid))
                 process.kill()
                 await process.wait()
                 raise
             except Exception as e:
-                logger.error(f"Stream error: {str(e)}")
+                logger.error(i18n.get("log.stream_error", error=str(e)))
                 process.kill()
                 await process.wait()
                 raise
             finally:
-                # プロセス終了待機（タイムアウト付き）
                 try:
                     returncode = await asyncio.wait_for(process.wait(), timeout=5.0)
                     
                     if returncode != 0:
-                        # エラーの場合のみstderrを出力
-                        error_summary = '\n'.join(stderr_lines[-10:])  # 最後の10行
-                        logger.error(f"yt-dlp exited with code {returncode}:\n{error_summary}")
+                        error_summary = '\n'.join(stderr_lines[-10:])
+                        logger.error(i18n.get("log.process_exit_error", code=returncode))
                     
                 except asyncio.TimeoutError:
-                    logger.warning("Process did not terminate, killing forcefully")
+                    logger.warning(i18n.get("log.process_timeout"))
                     process.kill()
                     await process.wait()
                 
-                # stderrタスクをクリーンアップ
                 stderr_task.cancel()
                 try:
                     await stderr_task
                 except asyncio.CancelledError:
                     pass
                 
-                # スロット解放
                 await release_download_slot(request)
         
         headers = {
@@ -731,15 +749,13 @@ async def stream_video(request: Request, video_request: VideoRequest):
         )
         
     except Exception as e:
-        # 例外時もスロット解放
         await release_download_slot(request)
         
-        # プロセスが生きていれば強制終了
         if process and process.returncode is None:
             process.kill()
             await process.wait()
         
-        logger.error(f"Stream error: {str(e)}")
+        logger.error(i18n.get("log.stream_error", error=str(e)))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/supported-sites", tags=["Info"])
@@ -747,7 +763,7 @@ async def get_supported_sites(
     limit: int = 50,
     search: Optional[str] = None
 ):
-    """サポートサイト一覧（検索対応）"""
+    """Get supported sites list"""
     
     sites = SUPPORTED_SITES
     
@@ -764,13 +780,10 @@ async def get_supported_sites(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """エラーハンドラー"""
-    
-    # スロット解放
     await release_download_slot(request)
     
     safe_url = safe_url_for_log(str(request.url))
-    logger.error(f"HTTP {exc.status_code}: {exc.detail} - {safe_url}")
+    logger.error(i18n.get("log.http_error", code=exc.status_code, detail=exc.detail, url=safe_url))
     
     return JSONResponse(
         status_code=exc.status_code,
@@ -785,19 +798,18 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """予期しないエラー"""
-    
-    # スロット解放
     await release_download_slot(request)
     
-    logger.exception(f"Unhandled exception: {str(exc)}")
+    logger.exception(i18n.get("log.unhandled_exception", error=str(exc)))
+    
+    locale = get_locale(request.headers.get("accept-language"))
     
     return JSONResponse(
         status_code=500,
         content={
             "error": True,
             "status_code": 500,
-            "detail": "Internal server error",
+            "detail": i18n.get("error.internal", locale=locale),
             "timestamp": datetime.now().isoformat()
         }
     )
