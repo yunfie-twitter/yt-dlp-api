@@ -1,8 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, Header
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, Field, validator
-from pydantic_settings import BaseSettings
 import subprocess
 import asyncio
 from typing import Optional, List, Dict
@@ -20,49 +19,44 @@ from rich.logging import RichHandler
 from rich.console import Console
 import logging
 
+# Configuration
+from config import config
+
 # i18n
 from i18n import i18n
 
 console = Console()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(console=console, rich_tracebacks=True)]
-)
+# Setup logging based on config
+if config.logging.enable_rich:
+    logging.basicConfig(
+        level=getattr(logging, config.logging.level),
+        format=config.logging.format,
+        datefmt="[%X]",
+        handlers=[RichHandler(console=console, rich_tracebacks=True)]
+    )
+else:
+    logging.basicConfig(
+        level=getattr(logging, config.logging.level),
+        format=config.logging.format
+    )
+
 logger = logging.getLogger(__name__)
 
-# Settings
-class Settings(BaseSettings):
-    redis_url: str = "redis://redis:6379"
-    rate_limit_requests: int = 5
-    rate_limit_window: int = 60
-    max_concurrent_downloads: int = 10
-    max_download_timeout: int = 3600
-    log_level: str = "INFO"
-    yt_dlp_js_runtime: Optional[str] = None
-    enable_ssrf_protection: bool = True
-    default_locale: str = "en"
-    
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
-logging.getLogger().setLevel(getattr(logging, settings.log_level))
-
 # Update i18n default locale
-i18n.default_locale = settings.default_locale
+i18n.default_locale = config.i18n.default_locale
 
 app = FastAPI(
-    title=i18n.get("api.title"),
-    description=i18n.get("api.description"),
-    version=i18n.get("api.version")
+    title=config.api.title,
+    description=config.api.description,
+    version=config.api.version,
+    docs_url=config.api.docs_url,
+    redoc_url=config.api.redoc_url
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.api.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,33 +79,35 @@ JS_RUNTIME_PATH: Optional[str] = None
 def get_locale(accept_language: Optional[str] = None) -> str:
     """Extract locale from Accept-Language header"""
     if not accept_language:
-        return settings.default_locale
+        return config.i18n.default_locale
     
-    # Parse Accept-Language header (e.g., "en-US,en;q=0.9,ja;q=0.8")
     languages = []
     for lang in accept_language.split(","):
         parts = lang.strip().split(";")
-        locale = parts[0].split("-")[0]  # Extract main language code
+        locale = parts[0].split("-")[0]
         languages.append(locale)
     
-    # Return first supported locale
     for locale in languages:
-        if locale in i18n.translations:
+        if locale in config.i18n.supported_locales:
             return locale
     
-    return settings.default_locale
+    return config.i18n.default_locale
 
 class VideoRequest(BaseModel):
     url: HttpUrl = Field(..., description="Video URL")
     format: Optional[str] = Field(None, description="Custom format specification")
     audio_only: Optional[bool] = Field(False, description="Download audio only")
-    audio_format: Optional[str] = Field("opus", description="Audio format (opus/m4a/mp3)")
+    audio_format: Optional[str] = Field(None, description="Audio format (opus/m4a/mp3)")
     quality: Optional[int] = Field(None, description="Video quality", ge=144, le=2160)
+    
+    @validator('audio_format', pre=True, always=True)
+    def set_default_audio_format(cls, v):
+        return v or config.ytdlp.default_audio_format
     
     @validator('url')
     def validate_url_safety(cls, v):
-        """SSRF protection: prevent access to internal IPs"""
-        if not settings.enable_ssrf_protection:
+        """SSRF protection"""
+        if not config.security.enable_ssrf_protection:
             return v
         
         try:
@@ -124,15 +120,31 @@ class VideoRequest(BaseModel):
             # Check if IP address
             try:
                 ip = ipaddress.ip_address(hostname)
-                if ip.is_private or ip.is_loopback or ip.is_link_local:
+                
+                if not config.security.allow_localhost and ip.is_loopback:
                     raise ValueError(i18n.get("error.private_ip"))
+                
+                if not config.security.allow_private_ips and ip.is_private:
+                    raise ValueError(i18n.get("error.private_ip"))
+                
+                if ip.is_link_local:
+                    raise ValueError(i18n.get("error.private_ip"))
+                    
             except ValueError:
                 # Hostname - resolve and check
                 try:
                     resolved_ip = socket.gethostbyname(hostname)
                     ip = ipaddress.ip_address(resolved_ip)
-                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    
+                    if not config.security.allow_localhost and ip.is_loopback:
                         raise ValueError(i18n.get("error.ip_resolves_private"))
+                    
+                    if not config.security.allow_private_ips and ip.is_private:
+                        raise ValueError(i18n.get("error.ip_resolves_private"))
+                    
+                    if ip.is_link_local:
+                        raise ValueError(i18n.get("error.ip_resolves_private"))
+                        
                 except socket.gaierror:
                     pass
             
@@ -179,8 +191,8 @@ class RedisRateLimiter:
     """Redis-based rate limiter with Lua script"""
     
     def __init__(self):
-        self.max_requests = settings.rate_limit_requests
-        self.window_seconds = settings.rate_limit_window
+        self.max_requests = config.rate_limit.max_requests
+        self.window_seconds = config.rate_limit.window_seconds
         
         self.lua_script = """
         local key = KEYS[1]
@@ -201,7 +213,7 @@ class RedisRateLimiter:
         """
     
     async def __call__(self, request: Request):
-        if not REDIS_AVAILABLE or redis_client is None:
+        if not config.rate_limit.enabled or not REDIS_AVAILABLE or redis_client is None:
             return True
         
         client_ip = request.client.host
@@ -248,12 +260,12 @@ class ConcurrencyLimiter:
         try:
             current = await redis_client.incr(key)
             
-            if current > settings.max_concurrent_downloads:
+            if current > config.download.max_concurrent:
                 await redis_client.decr(key)
                 locale = get_locale(request.headers.get("accept-language"))
                 raise HTTPException(
                     status_code=503,
-                    detail=i18n.get("error.server_busy", locale=locale, max=settings.max_concurrent_downloads)
+                    detail=i18n.get("error.server_busy", locale=locale, max=config.download.max_concurrent)
                 )
             
             request.state.download_slot_acquired = True
@@ -279,6 +291,9 @@ async def release_download_slot(request: Request):
 
 async def detect_js_runtime() -> Optional[str]:
     """Auto-detect JS runtime"""
+    if not config.ytdlp.auto_detect_runtime:
+        return None
+    
     runtimes = [
         ("deno", "/usr/local/bin/deno"),
         ("deno", "/usr/bin/deno"),
@@ -354,11 +369,21 @@ async def startup_event():
     """Startup handler"""
     global redis_client, DENO_VERSION, YTDLP_VERSION, JS_RUNTIME_PATH
     
-    console.rule(f"[bold blue]{i18n.get('startup.api_ready')}[/bold blue]")
+    console.rule(f"[bold blue]{config.api.title} v{config.api.version}[/bold blue]")
+    
+    # Display configuration
+    console.print(f"[cyan]Configuration:[/cyan]")
+    console.print(f"  Redis: {config.redis.url}")
+    console.print(f"  Rate limit: {config.rate_limit.max_requests} req/{config.rate_limit.window_seconds}s (enabled: {config.rate_limit.enabled})")
+    console.print(f"  Max concurrent downloads: {config.download.max_concurrent}")
+    console.print(f"  Download timeout: {config.download.timeout_seconds}s")
+    console.print(f"  SSRF protection: {config.security.enable_ssrf_protection}")
+    console.print(f"  Default locale: {config.i18n.default_locale}")
+    console.print(f"  Log level: {config.logging.level}")
     
     # JS runtime detection
-    if settings.yt_dlp_js_runtime:
-        JS_RUNTIME_PATH = settings.yt_dlp_js_runtime
+    if config.ytdlp.js_runtime:
+        JS_RUNTIME_PATH = config.ytdlp.js_runtime
         console.print(f"[cyan]{i18n.get('startup.js_runtime_configured', runtime=JS_RUNTIME_PATH)}[/cyan]")
     else:
         JS_RUNTIME_PATH = await detect_js_runtime()
@@ -391,10 +416,10 @@ async def startup_event():
     if REDIS_AVAILABLE:
         try:
             redis_client = await aioredis.from_url(
-                settings.redis_url,
+                config.redis.url,
                 encoding="utf-8",
                 decode_responses=True,
-                socket_connect_timeout=5
+                socket_connect_timeout=config.redis.socket_timeout
             )
             await redis_client.ping()
             console.print(f"[green]{i18n.get('startup.redis_connected')}[/green]")
@@ -408,9 +433,6 @@ async def startup_event():
     asyncio.create_task(load_supported_sites())
     
     console.rule(f"[bold green]{i18n.get('startup.api_ready')}[/bold green]")
-    console.print(f"[cyan]{i18n.get('startup.max_downloads', count=settings.max_concurrent_downloads)}[/cyan]")
-    console.print(f"[cyan]{i18n.get('startup.download_timeout', seconds=settings.max_download_timeout)}[/cyan]")
-    console.print(f"[cyan]{i18n.get('startup.ssrf_protection', enabled=settings.enable_ssrf_protection)}[/cyan]")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -423,14 +445,19 @@ async def shutdown_event():
 
 @app.get("/", tags=["Health"])
 async def root():
+    """Root endpoint"""
     return {
         "status": i18n.get("response.status_running"),
-        "service": i18n.get("api.title"),
-        "version": i18n.get("api.version"),
+        "service": config.api.title,
+        "version": config.api.version,
         "deno_version": DENO_VERSION,
         "ytdlp_version": YTDLP_VERSION,
         "redis_enabled": redis_client is not None,
-        "max_concurrent_downloads": settings.max_concurrent_downloads
+        "config": {
+            "max_concurrent_downloads": config.download.max_concurrent,
+            "rate_limit_enabled": config.rate_limit.enabled,
+            "ssrf_protection": config.security.enable_ssrf_protection
+        }
     }
 
 @app.get("/health", tags=["Health"])
@@ -486,7 +513,7 @@ async def health_check_full():
         "redis_status": redis_status,
         "js_runtime": JS_RUNTIME_PATH,
         "active_downloads": active_downloads,
-        "max_downloads": settings.max_concurrent_downloads,
+        "max_downloads": config.download.max_concurrent,
         "supported_sites_loaded": len(SUPPORTED_SITES)
     }
     
@@ -495,9 +522,24 @@ async def health_check_full():
     
     return health_data
 
+@app.get("/config", tags=["Admin"])
+async def get_config():
+    """Get current configuration (excluding sensitive data)"""
+    return {
+        "rate_limit": config.rate_limit.dict(),
+        "download": config.download.dict(),
+        "security": config.security.dict(),
+        "ytdlp": config.ytdlp.dict(),
+        "i18n": config.i18n.dict(),
+        "api": {
+            "title": config.api.title,
+            "version": config.api.version
+        }
+    }
+
 @app.post("/info", response_model=VideoInfo, tags=["Video Info"], dependencies=[Depends(rate_limiter)])
 async def get_video_info(request: Request, video_request: VideoRequest):
-    """Get video information"""
+    """Get video information without downloading"""
     
     locale = get_locale(request.headers.get("accept-language"))
     
@@ -505,10 +547,12 @@ async def get_video_info(request: Request, video_request: VideoRequest):
         'yt-dlp',
         '--dump-json',
         '--no-playlist',
-        '--match-filter', '!is_live',
-        '--socket-timeout', '10',
-        '--retries', '3',
+        '--socket-timeout', str(config.download.socket_timeout),
+        '--retries', str(config.download.retries),
     ]
+    
+    if not config.ytdlp.enable_live_streams:
+        cmd.extend(['--match-filter', '!is_live'])
     
     if JS_RUNTIME_PATH:
         cmd.extend(['--js-runtimes', JS_RUNTIME_PATH])
@@ -542,7 +586,7 @@ async def get_video_info(request: Request, video_request: VideoRequest):
         info = json.loads(stdout.decode())
         
         is_live = info.get('is_live', False)
-        if is_live:
+        if is_live and not config.ytdlp.enable_live_streams:
             raise HTTPException(status_code=400, detail=i18n.get("error.live_not_supported", locale=locale))
         
         logger.info(i18n.get("log.info_retrieved", title=info.get('title', 'Unknown')))
@@ -580,7 +624,7 @@ async def get_video_info(request: Request, video_request: VideoRequest):
 
 @app.post("/stream", tags=["Download"], dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
 async def stream_video(request: Request, video_request: VideoRequest):
-    """Stream video download"""
+    """Stream video download without saving to disk"""
     
     locale = get_locale(request.headers.get("accept-language"))
     
@@ -598,7 +642,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
             format_str = 'bestaudio[ext=m4a]/bestaudio'
             ext = 'm4a'
             media_type = 'audio/mp4'
-        else:
+        else:  # opus
             format_str = 'bestaudio[ext=webm]/bestaudio'
             ext = 'webm'
             media_type = 'audio/webm'
@@ -611,11 +655,11 @@ async def stream_video(request: Request, video_request: VideoRequest):
         ext = 'mp4'
         media_type = 'application/octet-stream'
     else:
-        format_str = 'best'
+        format_str = config.ytdlp.default_format
         ext = 'mp4'
         media_type = 'application/octet-stream'
     
-    # Get filename with --print
+    # Get filename with --print (lightweight, single request)
     filename = f"video.{ext}"
     
     try:
@@ -653,15 +697,17 @@ async def stream_video(request: Request, video_request: VideoRequest):
         '-f', format_str,
         '-o', '-',
         '--no-playlist',
-        '--match-filter', '!is_live',
-        '--socket-timeout', '10',
-        '--retries', '3',
+        '--socket-timeout', str(config.download.socket_timeout),
+        '--retries', str(config.download.retries),
     ]
+    
+    if not config.ytdlp.enable_live_streams:
+        cmd.extend(['--match-filter', '!is_live'])
     
     if JS_RUNTIME_PATH:
         cmd.extend(['--js-runtimes', JS_RUNTIME_PATH])
     
-    if settings.log_level != "DEBUG":
+    if config.logging.level != "DEBUG":
         cmd.extend(['--quiet', '--no-warnings'])
     
     if video_request.audio_only and video_request.audio_format == "mp3":
@@ -683,6 +729,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
         stderr_lines = []
         
         async def drain_stderr():
+            """Drain stderr to prevent buffer deadlock"""
             try:
                 while True:
                     line = await process.stderr.readline()
@@ -690,7 +737,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
                         break
                     decoded = line.decode().strip()
                     stderr_lines.append(decoded)
-                    if settings.log_level == "DEBUG":
+                    if config.logging.level == "DEBUG":
                         logger.debug(f"yt-dlp: {decoded}")
             except:
                 pass
@@ -698,7 +745,8 @@ async def stream_video(request: Request, video_request: VideoRequest):
         stderr_task = asyncio.create_task(drain_stderr())
         
         async def generate():
-            CHUNK_SIZE = 1024 * 1024
+            """Stream generator"""
+            CHUNK_SIZE = 1024 * 1024  # 1MB chunks
             try:
                 while True:
                     chunk = await process.stdout.read(CHUNK_SIZE)
@@ -717,11 +765,16 @@ async def stream_video(request: Request, video_request: VideoRequest):
                 raise
             finally:
                 try:
-                    returncode = await asyncio.wait_for(process.wait(), timeout=5.0)
+                    returncode = await asyncio.wait_for(
+                        process.wait(), 
+                        timeout=5.0
+                    )
                     
                     if returncode != 0:
                         error_summary = '\n'.join(stderr_lines[-10:])
                         logger.error(i18n.get("log.process_exit_error", code=returncode))
+                        if error_summary:
+                            logger.error(f"stderr: {error_summary}")
                     
                 except asyncio.TimeoutError:
                     logger.warning(i18n.get("log.process_timeout"))
@@ -763,7 +816,7 @@ async def get_supported_sites(
     limit: int = 50,
     search: Optional[str] = None
 ):
-    """Get supported sites list"""
+    """Get list of supported sites"""
     
     sites = SUPPORTED_SITES
     
@@ -780,6 +833,8 @@ async def get_supported_sites(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP exception handler"""
+    
     await release_download_slot(request)
     
     safe_url = safe_url_for_log(str(request.url))
@@ -798,6 +853,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
+    """General exception handler"""
+    
     await release_download_slot(request)
     
     logger.exception(i18n.get("log.unhandled_exception", error=str(exc)))
