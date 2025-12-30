@@ -1,7 +1,10 @@
 from typing import Optional
 import redis.asyncio as aioredis
+from rich.console import Console
 from config.settings import config
 from core.state import state
+
+console = Console()
 
 async def init_redis() -> None:
     """Initialize Redis connection with recovery"""
@@ -31,10 +34,13 @@ async def init_redis() -> None:
         
         state.redis = redis_client
         
-        print(f"✓ Redis connected (recovered {len(keys)} active downloads)")
+        if len(keys) > 0:
+            console.print(f"[yellow]✓ Redis connected (recovered {len(keys)} active downloads)[/yellow]")
+        else:
+            console.print(f"[green]✓ Redis connected[/green]")
         
     except Exception as e:
-        print(f"⚠ Redis connection failed: {str(e)}")
+        console.print(f"[yellow]⚠ Redis connection failed: {str(e)}[/yellow]")
         state.redis = None
 
 def get_redis() -> Optional[aioredis.Redis]:
@@ -46,3 +52,4 @@ async def close_redis() -> None:
     if state.redis:
         await state.redis.close()
         state.redis = None
+        console.print("[dim]✓ Redis connection closed[/dim]")
