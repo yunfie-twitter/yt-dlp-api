@@ -4,3 +4,4 @@ redis==5.0.1
 pydantic==2.5.3
 pydantic-settings==2.1.0
 rich==13.7.0
+babel==2.14.0
