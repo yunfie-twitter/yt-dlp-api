@@ -43,7 +43,7 @@ app.include_router(admin.router, tags=["Admin"])
 # Startup
 @app.on_event("startup")
 async def startup_event():
-    print(f"🚀 Starting {config.api.title} v{config.api.version}")
+    print(f"Starting {config.api.title} v{config.api.version}")
     
     await init_redis()
     
