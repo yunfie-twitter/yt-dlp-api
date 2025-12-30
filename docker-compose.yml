@@ -13,6 +13,8 @@ services:
       - RATE_LIMIT_REQUESTS=5
       - RATE_LIMIT_WINDOW=60
       - LOG_LEVEL=INFO
+      - YT_DLP_JS_RUNTIME=deno:/usr/local/bin/deno
+      - DENO_DIR=/home/appuser/.cache/deno
     ports:
       - "8000:8000"
     depends_on:
@@ -20,6 +22,9 @@ services:
         condition: service_healthy
     networks:
       - backend
+    volumes:
+      # Denoキャッシュを永続化（オプション）
+      - deno_cache:/home/appuser/.cache/deno
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -32,7 +37,11 @@ services:
     image: redis:7-alpine
     container_name: ytdlp-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    command: 
+      - redis-server
+      - --appendonly yes
+      - --maxmemory 256mb
+      - --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     networks:
@@ -42,9 +51,13 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    ports:
+      - "6379:6379"  # 開発用（本番では削除推奨）
 
 volumes:
   redis_data:
+    driver: local
+  deno_cache:
     driver: local
 
 networks:
