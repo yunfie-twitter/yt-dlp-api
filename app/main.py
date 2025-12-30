@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 5
     rate_limit_window: int = 60
     log_level: str = "INFO"
+    yt_dlp_js_runtime: str = "deno:/usr/local/bin/deno"
     
     class Config:
         env_file = ".env"
@@ -32,9 +33,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="yt-dlp Streaming API",
-    description="動画をストリーミングでダウンロードするAPI（Docker完全対応版）",
-    version="3.1.0"
+    title="yt-dlp Streaming API with Deno",
+    description="Deno対応 yt-dlp ストリーミングAPI（Nginx無し構成）",
+    version="3.2.0"
 )
 
 # Redis接続
@@ -47,12 +48,14 @@ except ImportError:
 
 SUPPORTED_SITES: List[str] = []
 redis_client: Optional[aioredis.Redis] = None
+DENO_VERSION: str = "unknown"
+YTDLP_VERSION: str = "unknown"
 
 class VideoRequest(BaseModel):
     url: HttpUrl = Field(..., description="動画のURL")
     format: Optional[str] = Field(None, description="カスタムフォーマット指定")
     audio_only: Optional[bool] = Field(False, description="音声のみダウンロード")
-    audio_format: Optional[str] = Field("bestaudio", description="音声フォーマット")
+    audio_format: Optional[str] = Field("bestaudio", description="音声フォーマット (bestaudio/mp3/aac/opus)")
     quality: Optional[int] = Field(None, description="画質指定", ge=144, le=2160)
 
 class VideoInfo(BaseModel):
@@ -115,10 +118,62 @@ class RedisRateLimiter:
 
 rate_limiter = RedisRateLimiter()
 
+async def check_deno_installation() -> Dict[str, str]:
+    """Denoのインストール状態を確認"""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'deno', '--version',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        version_output = stdout.decode().strip()
+        
+        # バージョン番号を抽出
+        deno_version = "unknown"
+        for line in version_output.split('\n'):
+            if line.startswith('deno '):
+                deno_version = line.split()[1]
+                break
+        
+        return {
+            "status": "installed",
+            "version": deno_version,
+            "path": "/usr/local/bin/deno"
+        }
+    except Exception as e:
+        logger.error(f"Deno確認エラー: {str(e)}")
+        return {
+            "status": "not_found",
+            "error": str(e)
+        }
+
 @app.on_event("startup")
 async def startup_event():
     """起動時処理"""
-    global SUPPORTED_SITES, redis_client
+    global SUPPORTED_SITES, redis_client, DENO_VERSION, YTDLP_VERSION
+    
+    # Denoインストール確認
+    deno_info = await check_deno_installation()
+    if deno_info["status"] == "installed":
+        DENO_VERSION = deno_info["version"]
+        logger.info(f"✅ Deno {DENO_VERSION} インストール確認")
+    else:
+        logger.error(f"❌ Deno未インストール: {deno_info.get('error')}")
+        logger.error("⚠️  YouTube動画のダウンロードが失敗する可能性があります")
+    
+    # yt-dlpバージョン確認
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'yt-dlp', '--version',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        YTDLP_VERSION = stdout.decode().strip()
+        logger.info(f"✅ yt-dlp {YTDLP_VERSION} インストール確認")
+    except Exception as e:
+        logger.error(f"❌ yt-dlpバージョン確認失敗: {str(e)}")
     
     # Redis接続
     if REDIS_AVAILABLE:
@@ -130,9 +185,9 @@ async def startup_event():
                 socket_connect_timeout=5
             )
             await redis_client.ping()
-            logger.info("Redis接続成功")
+            logger.info("✅ Redis接続成功")
         except Exception as e:
-            logger.warning(f"Redis接続失敗: {str(e)}")
+            logger.warning(f"⚠️  Redis接続失敗: {str(e)}")
             redis_client = None
     
     # サポートサイト読み込み
@@ -144,9 +199,9 @@ async def startup_event():
         )
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10.0)
         SUPPORTED_SITES = stdout.decode().strip().split('\n')
-        logger.info(f"サポートサイト {len(SUPPORTED_SITES)} 件をキャッシュ")
+        logger.info(f"✅ サポートサイト {len(SUPPORTED_SITES)} 件をキャッシュ")
     except Exception as e:
-        logger.error(f"サポートサイト読み込み失敗: {str(e)}")
+        logger.error(f"❌ サポートサイト読み込み失敗: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -159,50 +214,70 @@ async def shutdown_event():
 async def root():
     return {
         "status": "running",
-        "service": "yt-dlp Streaming API",
-        "version": "3.1.0",
+        "service": "yt-dlp Streaming API with Deno",
+        "version": "3.2.0",
+        "deno_version": DENO_VERSION,
+        "ytdlp_version": YTDLP_VERSION,
         "redis_enabled": redis_client is not None
     }
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """ヘルスチェック"""
+    """ヘルスチェック（Deno確認含む）"""
+    
+    # yt-dlpチェック
     try:
         process = await asyncio.create_subprocess_exec(
             'yt-dlp', '--version',
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL
+            stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
-        yt_dlp_version = stdout.decode().strip()
-        
-        # Redisヘルスチェック
-        redis_status = "disabled"
-        if redis_client:
-            try:
-                await redis_client.ping()
-                redis_status = "connected"
-            except:
-                redis_status = "disconnected"
-        
-        return {
-            "status": "healthy",
-            "yt_dlp_version": yt_dlp_version,
-            "redis_status": redis_status
-        }
+        ytdlp_version = stdout.decode().strip()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"yt-dlp unavailable: {str(e)}")
+    
+    # Denoチェック
+    deno_info = await check_deno_installation()
+    
+    # Redisチェック
+    redis_status = "disabled"
+    if redis_client:
+        try:
+            await redis_client.ping()
+            redis_status = "connected"
+        except:
+            redis_status = "disconnected"
+    
+    health_data = {
+        "status": "healthy",
+        "ytdlp_version": ytdlp_version,
+        "deno": deno_info,
+        "redis_status": redis_status,
+        "js_runtime_config": settings.yt_dlp_js_runtime
+    }
+    
+    # Denoが無い場合は警告を追加
+    if deno_info["status"] != "installed":
+        health_data["warning"] = "Deno未インストール。YouTube動画のダウンロードが失敗する可能性があります。"
+    
+    return health_data
 
 @app.post("/info", response_model=VideoInfo, tags=["Video Info"], dependencies=[Depends(rate_limiter)])
 async def get_video_info(request: VideoRequest):
-    """動画情報取得"""
+    """動画情報取得（Deno対応）"""
+    
     cmd = [
         'yt-dlp',
         '--dump-json',
         '--no-playlist',
-        str(request.url)
     ]
+    
+    # Denoランタイムを明示的に指定
+    if settings.yt_dlp_js_runtime:
+        cmd.extend(['--js-runtimes', settings.yt_dlp_js_runtime])
+    
+    cmd.append(str(request.url))
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -244,18 +319,32 @@ async def get_video_info(request: VideoRequest):
         
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="タイムアウト")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSONパースエラー: {str(e)}")
+        raise HTTPException(status_code=500, detail="動画情報のパースに失敗")
     except Exception as e:
         logger.error(f"エラー: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/stream", tags=["Download"], dependencies=[Depends(rate_limiter)])
 async def stream_video(request: VideoRequest):
-    """ストリーミングダウンロード"""
+    """ストリーミングダウンロード（Deno対応）"""
     
     # 動画情報取得
     try:
+        info_cmd = [
+            'yt-dlp',
+            '--dump-json',
+            '--no-playlist',
+        ]
+        
+        if settings.yt_dlp_js_runtime:
+            info_cmd.extend(['--js-runtimes', settings.yt_dlp_js_runtime])
+        
+        info_cmd.append(str(request.url))
+        
         info_process = await asyncio.create_subprocess_exec(
-            'yt-dlp', '--dump-json', '--no-playlist', str(request.url),
+            *info_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL
@@ -276,6 +365,14 @@ async def stream_video(request: VideoRequest):
             format_str = 'bestaudio'
             ext = 'mp3'
             media_type = 'audio/mpeg'
+        elif request.audio_format == "aac":
+            format_str = 'bestaudio[ext=m4a]/bestaudio'
+            ext = 'm4a'
+            media_type = 'audio/mp4'
+        elif request.audio_format == "opus":
+            format_str = 'bestaudio[ext=webm]/bestaudio'
+            ext = 'webm'
+            media_type = 'audio/webm'
         else:
             format_str = 'bestaudio'
             ext = 'webm'
@@ -305,6 +402,10 @@ async def stream_video(request: VideoRequest):
         '--quiet',
         '--no-warnings',
     ]
+    
+    # Denoランタイムを明示的に指定
+    if settings.yt_dlp_js_runtime:
+        cmd.extend(['--js-runtimes', settings.yt_dlp_js_runtime])
     
     if request.audio_only and request.audio_format == "mp3":
         cmd.extend(['-x', '--audio-format', 'mp3'])
