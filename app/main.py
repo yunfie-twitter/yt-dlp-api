@@ -19,6 +19,7 @@ import uuid
 from collections import deque
 import functools
 from contextlib import suppress
+import heapq
 
 # Rich logging
 from rich.logging import RichHandler
@@ -33,11 +34,17 @@ from i18n import i18n
 
 console = Console()
 
+# Constants
+CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
+INFO_CACHE_TTL = 300  # 5 minutes
+SSRF_CACHE_TTL = 300
+STDERR_MAX_LINES = 50
+
 # Setup logging
 if config.logging.enable_rich:
     logging.basicConfig(
         level=getattr(logging, config.logging.level),
-        format=config.logging.format,
+        format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(console=console, rich_tracebacks=True)]
     )
@@ -89,12 +96,32 @@ except ImportError:
     REDIS_AVAILABLE = False
     logger.warning(i18n.get("startup.redis_not_installed"))
 
-SUPPORTED_SITES: List[str] = []
+# Global state (immutable after initialization)
+SUPPORTED_SITES: Tuple[str, ...] = ()
 SUPPORTED_SITES_ETAG: str = ""
 redis_client: Optional[aioredis.Redis] = None
 DENO_VERSION: str = "unknown"
 YTDLP_VERSION: str = "unknown"
 JS_RUNTIME_PATH: Optional[str] = None
+
+# ============================================================================
+# Middleware: Request ID
+# ============================================================================
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add request ID for tracing"""
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    
+    return response
+
+# ============================================================================
+# Utilities
+# ============================================================================
 
 def get_locale(accept_language: Optional[str] = None) -> str:
     """Extract locale from Accept-Language header"""
@@ -117,12 +144,52 @@ def get_i18n(locale: str):
     """Get i18n helper function with bound locale"""
     return functools.partial(i18n.get, locale=locale)
 
+def sanitize_filename(name: str, max_length: int = 200) -> str:
+    """Sanitize filename for safe storage"""
+    name = unicodedata.normalize("NFKC", name)
+    name = re.sub(r'[\\/:*?"<>|]', '_', name)
+    
+    windows_reserved = {
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    }
+    if name.upper() in windows_reserved:
+        name = f"_{name}"
+    
+    return name[:max_length].strip()
+
+def safe_url_for_log(url: str) -> str:
+    """Safe URL for logging"""
+    try:
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        
+        if config.logging.level == "DEBUG" and parsed.query:
+            return f"{base_url}?..."
+        
+        return base_url
+    except:
+        return "invalid_url"
+
+def hash_stable(data: str) -> str:
+    """Create stable hash"""
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+# ============================================================================
+# Security Validator
+# ============================================================================
+
 class SecurityValidator:
-    """Validate URL security (SSRF protection)"""
+    """Validate URL security with caching"""
     
     @staticmethod
-    def validate_url(url: str) -> None:
-        """Validate URL against SSRF attacks"""
+    async def validate_url(url: str) -> None:
+        """
+        Validate URL against SSRF attacks.
+        Uses async DNS resolution to prevent event loop blocking.
+        Results are cached in Redis to reduce DNS queries.
+        """
         if not config.security.enable_ssrf_protection:
             return
         
@@ -133,35 +200,70 @@ class SecurityValidator:
             if not hostname:
                 raise ValueError("Invalid URL")
             
-            # Get all resolved IPs (IPv4 + IPv6)
+            # Check cache first
+            if redis_client:
+                cache_key = f"ssrf:{hash_stable(hostname)}"
+                cached = await redis_client.get(cache_key)
+                if cached == "ok":
+                    return
+                if cached == "blocked":
+                    raise ValueError(i18n.get("error.private_ip"))
+            
+            # Async DNS resolution to prevent event loop blocking
             try:
-                addr_info = socket.getaddrinfo(hostname, None)
+                addr_info = await asyncio.to_thread(
+                    socket.getaddrinfo,
+                    hostname,
+                    None
+                )
                 ips = [info[4][0] for info in addr_info]
             except socket.gaierror:
+                # DNS resolution failed - cache as OK and let yt-dlp handle it
+                if redis_client:
+                    await redis_client.setex(cache_key, SSRF_CACHE_TTL, "ok")
                 return
             
             # Check all resolved IPs
+            is_blocked = False
             for ip_str in ips:
                 try:
                     ip = ipaddress.ip_address(ip_str)
                     
                     if not config.security.allow_localhost and ip.is_loopback:
-                        raise ValueError(i18n.get("error.private_ip"))
+                        is_blocked = True
+                        break
                     
                     if not config.security.allow_private_ips and ip.is_private:
-                        raise ValueError(i18n.get("error.private_ip"))
+                        is_blocked = True
+                        break
                     
                     if ip.is_link_local or ip.is_multicast:
-                        raise ValueError(i18n.get("error.private_ip"))
+                        is_blocked = True
+                        break
                         
                 except ValueError as e:
                     if "does not appear to be" in str(e):
                         continue
                     raise
+            
+            # Cache result
+            if redis_client:
+                await redis_client.setex(
+                    cache_key,
+                    SSRF_CACHE_TTL,
+                    "blocked" if is_blocked else "ok"
+                )
+            
+            if is_blocked:
+                raise ValueError(i18n.get("error.private_ip"))
                     
         except Exception as e:
             logger.error(f"URL validation failed: {str(e)}")
             raise ValueError(i18n.get("error.invalid_url", reason=str(e)))
+
+# ============================================================================
+# Models
+# ============================================================================
 
 class DownloadIntent(BaseModel):
     """Internal download intent (separated from HTTP concerns)"""
@@ -172,11 +274,54 @@ class DownloadIntent(BaseModel):
     custom_format: Optional[str]
 
 class MediaMetadata(BaseModel):
-    """Media metadata separated from format decision"""
+    """Media metadata"""
     format_str: str
     ext: str
     media_type: str
-    estimated_size: Optional[int] = None
+
+class VideoRequest(BaseModel):
+    url: HttpUrl = Field(..., description="Video URL")
+    format: Optional[str] = Field(None, description="Custom format specification")
+    audio_only: Optional[bool] = Field(False, description="Download audio only")
+    audio_format: Optional[str] = Field(None, description="Audio format (opus/m4a/mp3)")
+    quality: Optional[int] = Field(None, description="Video quality", ge=144, le=2160)
+    
+    @validator('audio_format', pre=True, always=True)
+    def set_default_audio_format(cls, v):
+        return v or config.ytdlp.default_audio_format
+    
+    @validator('url')
+    def validate_url_syntax(cls, v):
+        """Validate URL syntax only (SSRF check done at endpoint)"""
+        parsed = urlparse(str(v))
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Invalid URL format")
+        return v
+    
+    def to_intent(self) -> DownloadIntent:
+        """Convert to download intent"""
+        return DownloadIntent(
+            url=str(self.url),
+            audio_only=self.audio_only,
+            audio_format=self.audio_format,
+            quality=self.quality,
+            custom_format=self.format
+        )
+
+class VideoInfo(BaseModel):
+    title: str
+    duration: Optional[int]
+    ext: str
+    filesize: Optional[int]
+    formats: List[Dict]
+    thumbnail: Optional[str]
+    uploader: Optional[str]
+    webpage_url: str
+    is_live: bool = False
+
+# ============================================================================
+# Format Decision
+# ============================================================================
 
 class FormatDecision:
     """Make format decisions"""
@@ -229,6 +374,10 @@ class FormatDecision:
             media_type='application/octet-stream'
         )
 
+# ============================================================================
+# YT-DLP Command Builder
+# ============================================================================
+
 class YTDLPCommandBuilder:
     """Build yt-dlp commands"""
     
@@ -259,9 +408,13 @@ class YTDLPCommandBuilder:
         format_str: str,
         js_runtime: Optional[str],
         audio_only: bool,
-        audio_format: str
+        audio_format: str,
+        include_filesize: bool = True
     ) -> List[str]:
-        """Build command for streaming download"""
+        """
+        Build command for streaming download.
+        Includes --print filesize_approx to get Content-Length in one call.
+        """
         cmd = [
             'yt-dlp',
             url,
@@ -271,6 +424,10 @@ class YTDLPCommandBuilder:
             '--socket-timeout', str(config.download.socket_timeout),
             '--retries', str(config.download.retries),
         ]
+        
+        # Print filesize before streaming
+        if include_filesize:
+            cmd.extend(['--print', 'before_dl:%(filesize_approx)s'])
         
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
@@ -285,94 +442,10 @@ class YTDLPCommandBuilder:
             cmd.extend(['-x', '--audio-format', 'mp3'])
         
         return cmd
-    
-    @staticmethod
-    def build_filesize_command(url: str, format_str: str, js_runtime: Optional[str]) -> List[str]:
-        """Build command for getting approximate filesize"""
-        cmd = [
-            'yt-dlp',
-            '--print', 'filesize_approx',
-            '-f', format_str,
-            '--no-playlist',
-        ]
-        
-        if js_runtime:
-            cmd.extend(['--js-runtimes', js_runtime])
-        
-        cmd.append(url)
-        
-        return cmd
 
-class VideoRequest(BaseModel):
-    url: HttpUrl = Field(..., description="Video URL")
-    format: Optional[str] = Field(None, description="Custom format specification")
-    audio_only: Optional[bool] = Field(False, description="Download audio only")
-    audio_format: Optional[str] = Field(None, description="Audio format (opus/m4a/mp3)")
-    quality: Optional[int] = Field(None, description="Video quality", ge=144, le=2160)
-    
-    @validator('audio_format', pre=True, always=True)
-    def set_default_audio_format(cls, v):
-        return v or config.ytdlp.default_audio_format
-    
-    @validator('url')
-    def validate_url_safety(cls, v):
-        """SSRF protection"""
-        SecurityValidator.validate_url(str(v))
-        return v
-    
-    def to_intent(self) -> DownloadIntent:
-        """Convert to download intent"""
-        return DownloadIntent(
-            url=str(self.url),
-            audio_only=self.audio_only,
-            audio_format=self.audio_format,
-            quality=self.quality,
-            custom_format=self.format
-        )
-
-class VideoInfo(BaseModel):
-    title: str
-    duration: Optional[int]
-    ext: str
-    filesize: Optional[int]
-    formats: List[Dict]
-    thumbnail: Optional[str]
-    uploader: Optional[str]
-    webpage_url: str
-    is_live: bool = False
-
-def sanitize_filename(name: str, max_length: int = 200) -> str:
-    """Sanitize filename"""
-    name = unicodedata.normalize("NFKC", name)
-    name = re.sub(r'[\\/:*?"<>|]', '_', name)
-    
-    windows_reserved = {
-        'CON', 'PRN', 'AUX', 'NUL',
-        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
-    }
-    if name.upper() in windows_reserved:
-        name = f"_{name}"
-    
-    return name[:max_length].strip()
-
-def safe_url_for_log(url: str) -> str:
-    """Safe URL for logging"""
-    try:
-        parsed = urlparse(url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        
-        # In DEBUG mode, include query for debugging
-        if config.logging.level == "DEBUG" and parsed.query:
-            return f"{base_url}?..."
-        
-        return base_url
-    except:
-        return "invalid_url"
-
-def hash_user_agent(user_agent: str) -> str:
-    """Create stable hash of user agent"""
-    return hashlib.sha256(user_agent.encode()).hexdigest()[:8]
+# ============================================================================
+# Rate Limiter
+# ============================================================================
 
 class RedisRateLimiter:
     """Redis-based rate limiter with Lua script"""
@@ -405,10 +478,9 @@ class RedisRateLimiter:
         
         client_ip = request.client.host
         endpoint = request.url.path
-        user_agent = request.headers.get("user-agent", "")
-        ua_hash = hash_user_agent(user_agent)
         
-        key = f"rate:{client_ip}:{endpoint}:{ua_hash}"
+        # Simplified key (removed UA hash to reduce Redis keys)
+        key = f"rate:{client_ip}:{endpoint}"
         
         try:
             result = await redis_client.eval(
@@ -434,19 +506,27 @@ class RedisRateLimiter:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(i18n.get("log.redis_rate_limit_error", error=str(e)))
+            logger.error(i18n.get("log.redis_rate_limit_error", error=str(e)), extra={"request_id": request.state.request_id})
             return True
 
+# ============================================================================
+# Concurrency Limiter
+# ============================================================================
+
 class ConcurrencyLimiter:
-    """Concurrent download limiter with atomic operations"""
+    """
+    Concurrent download limiter with atomic operations.
+    Uses Lua script to prevent TOCTOU races.
+    Counter has TTL for auto-cleanup.
+    """
     
     def __init__(self):
-        # Lua script for atomic check and increment
         self.lua_script = """
         local counter_key = KEYS[1]
         local slot_key = KEYS[2]
         local limit = tonumber(ARGV[1])
-        local ttl = tonumber(ARGV[2])
+        local slot_ttl = tonumber(ARGV[2])
+        local counter_ttl = tonumber(ARGV[3])
         
         local current = tonumber(redis.call('GET', counter_key) or "0")
         if current >= limit then
@@ -454,7 +534,8 @@ class ConcurrencyLimiter:
         end
         
         redis.call('INCR', counter_key)
-        redis.call('SETEX', slot_key, ttl, "1")
+        redis.call('EXPIRE', counter_key, counter_ttl)
+        redis.call('SETEX', slot_key, slot_ttl, "1")
         
         return 1
         """
@@ -466,17 +547,18 @@ class ConcurrencyLimiter:
         request_id = str(uuid.uuid4())
         counter_key = "active_downloads_count"
         slot_key = f"active_download:{request_id}"
-        ttl = config.download.timeout_seconds + 60
+        slot_ttl = config.download.timeout_seconds + 60
+        counter_ttl = slot_ttl * 2  # Counter TTL = 2x slot TTL for safety
         
         try:
-            # Atomic check and increment
             allowed = await redis_client.eval(
                 self.lua_script,
                 2,
                 counter_key,
                 slot_key,
                 config.download.max_concurrent,
-                ttl
+                slot_ttl,
+                counter_ttl
             )
             
             if not allowed:
@@ -494,7 +576,7 @@ class ConcurrencyLimiter:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(i18n.get("log.concurrency_error", error=str(e)))
+            logger.error(i18n.get("log.concurrency_error", error=str(e)), extra={"request_id": request.state.request_id})
             return True
 
 rate_limiter = RedisRateLimiter()
@@ -510,39 +592,110 @@ async def release_download_slot(request: Request):
             await redis_client.delete(request.state.download_slot_key)
             await redis_client.decr("active_downloads_count")
         except Exception as e:
-            logger.error(i18n.get("log.slot_release_failed", error=str(e)))
+            logger.error(i18n.get("log.slot_release_failed", error=str(e)), extra={"request_id": request.state.request_id})
 
-async def detect_js_runtime() -> Optional[str]:
-    """Auto-detect JS runtime"""
-    if not config.ytdlp.auto_detect_runtime:
-        return None
-    
-    runtimes = [
-        ("deno", "/usr/local/bin/deno"),
-        ("deno", "/usr/bin/deno"),
-        ("node", "/usr/local/bin/node"),
-        ("node", "/usr/bin/node"),
-    ]
-    
-    for runtime_name, runtime_path in runtimes:
-        if os.path.exists(runtime_path):
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    runtime_path, '--version',
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                await asyncio.wait_for(process.communicate(), timeout=3.0)
-                if process.returncode == 0:
-                    logger.info(i18n.get("log.js_runtime_detected", name=runtime_name, path=runtime_path))
-                    return f"{runtime_name}:{runtime_path}"
-            except:
-                pass
-    
-    return None
+# ============================================================================
+# Initialization Functions
+# ============================================================================
 
-async def check_deno_installation() -> Dict[str, str]:
-    """Check Deno installation"""
+async def init_redis():
+    """Initialize Redis connection with recovery"""
+    global redis_client
+    
+    if not REDIS_AVAILABLE:
+        return
+    
+    try:
+        redis_client = await aioredis.from_url(
+            config.redis.url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=config.redis.socket_timeout
+        )
+        await redis_client.ping()
+        
+        # Recover active downloads counter
+        keys = []
+        cursor = 0
+        while True:
+            cursor, partial_keys = await redis_client.scan(
+                cursor,
+                match="active_download:*",
+                count=100
+            )
+            keys.extend(partial_keys)
+            if cursor == 0:
+                break
+        
+        await redis_client.set("active_downloads_count", len(keys))
+        
+        if len(keys) > 0:
+            console.print(f"[yellow]Recovered {len(keys)} active downloads[/yellow]")
+            logger.info(f"Recovered {len(keys)} active download slots")
+        else:
+            console.print(f"[green]Active downloads counter initialized[/green]")
+        
+        console.print(f"[green]{i18n.get('startup.redis_connected')}[/green]")
+        logger.info(i18n.get("startup.redis_connected"))
+        
+    except Exception as e:
+        console.print(f"[yellow]{i18n.get('startup.redis_failed', error=str(e))}[/yellow]")
+        logger.warning(i18n.get("startup.redis_failed", error=str(e)))
+        redis_client = None
+
+async def init_ytdlp():
+    """Initialize yt-dlp and check version"""
+    global YTDLP_VERSION
+    
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'yt-dlp', '--version',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        YTDLP_VERSION = stdout.decode().strip()
+        console.print(f"[green]{i18n.get('startup.ytdlp_detected', version=YTDLP_VERSION)}[/green]")
+    except Exception as e:
+        console.print(f"[red]{i18n.get('startup.ytdlp_failed')}[/red]")
+        logger.error(i18n.get("startup.ytdlp_failed"))
+
+async def init_runtime():
+    """Initialize JS runtime detection"""
+    global JS_RUNTIME_PATH, DENO_VERSION
+    
+    if config.ytdlp.js_runtime:
+        JS_RUNTIME_PATH = config.ytdlp.js_runtime
+        console.print(f"[cyan]{i18n.get('startup.js_runtime_configured', runtime=JS_RUNTIME_PATH)}[/cyan]")
+    elif config.ytdlp.auto_detect_runtime:
+        runtimes = [
+            ("deno", "/usr/local/bin/deno"),
+            ("deno", "/usr/bin/deno"),
+            ("node", "/usr/local/bin/node"),
+            ("node", "/usr/bin/node"),
+        ]
+        
+        for runtime_name, runtime_path in runtimes:
+            if os.path.exists(runtime_path):
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        runtime_path, '--version',
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await asyncio.wait_for(process.communicate(), timeout=3.0)
+                    if process.returncode == 0:
+                        JS_RUNTIME_PATH = f"{runtime_name}:{runtime_path}"
+                        logger.info(i18n.get("log.js_runtime_detected", name=runtime_name, path=runtime_path))
+                        console.print(f"[green]{i18n.get('startup.js_runtime_detected', runtime=JS_RUNTIME_PATH)}[/green]")
+                        break
+                except:
+                    pass
+        
+        if not JS_RUNTIME_PATH:
+            console.print(f"[yellow]{i18n.get('startup.js_runtime_none')}[/yellow]")
+    
+    # Check Deno specifically
     try:
         process = await asyncio.create_subprocess_exec(
             'deno', '--version',
@@ -552,25 +705,16 @@ async def check_deno_installation() -> Dict[str, str]:
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
         version_output = stdout.decode().strip()
         
-        deno_version = "unknown"
         for line in version_output.split('\n'):
             if line.startswith('deno '):
-                deno_version = line.split()[1]
+                DENO_VERSION = line.split()[1]
+                console.print(f"[green]{i18n.get('startup.deno_detected', version=DENO_VERSION)}[/green]")
                 break
-        
-        return {
-            "status": i18n.get("response.deno_installed"),
-            "version": deno_version,
-            "path": "/usr/local/bin/deno"
-        }
-    except Exception as e:
-        return {
-            "status": i18n.get("response.deno_not_found"),
-            "error": str(e)
-        }
+    except:
+        pass
 
-async def load_supported_sites():
-    """Load supported sites with Redis cache and ETag"""
+async def init_supported_sites():
+    """Load supported sites with Redis cache"""
     global SUPPORTED_SITES, SUPPORTED_SITES_ETAG
     
     # Try Redis cache first
@@ -578,7 +722,8 @@ async def load_supported_sites():
         try:
             cached = await redis_client.get("supported_sites:cache")
             if cached:
-                SUPPORTED_SITES = json.loads(cached)
+                sites_list = json.loads(cached)
+                SUPPORTED_SITES = tuple(sites_list)  # Immutable
                 SUPPORTED_SITES_ETAG = hashlib.sha256(cached.encode()).hexdigest()[:16]
                 console.print(f"[green]Loaded {len(SUPPORTED_SITES)} sites from cache[/green]")
                 logger.info(f"Loaded {len(SUPPORTED_SITES)} extractors from cache")
@@ -594,9 +739,10 @@ async def load_supported_sites():
             stderr=asyncio.subprocess.DEVNULL
         )
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15.0)
-        SUPPORTED_SITES = stdout.decode().strip().split('\n')
+        sites_list = stdout.decode().strip().split('\n')
+        SUPPORTED_SITES = tuple(sites_list)  # Immutable
         
-        sites_json = json.dumps(SUPPORTED_SITES)
+        sites_json = json.dumps(sites_list)
         SUPPORTED_SITES_ETAG = hashlib.sha256(sites_json.encode()).hexdigest()[:16]
         
         # Cache in Redis (1 day TTL)
@@ -612,113 +758,31 @@ async def load_supported_sites():
         console.print(f"[yellow]{i18n.get('startup.sites_failed')}[/yellow]")
         logger.warning(i18n.get("log.extractor_load_failed", error=str(e)))
 
-async def recover_active_downloads():
-    """Recover active downloads counter from individual keys"""
-    if not redis_client:
-        return
-    
-    try:
-        # Scan for active download keys
-        keys = []
-        cursor = 0
-        while True:
-            cursor, partial_keys = await redis_client.scan(
-                cursor,
-                match="active_download:*",
-                count=100
-            )
-            keys.extend(partial_keys)
-            if cursor == 0:
-                break
-        
-        # Set counter to actual count
-        await redis_client.set("active_downloads_count", len(keys))
-        
-        if len(keys) > 0:
-            console.print(f"[yellow]Recovered {len(keys)} active downloads[/yellow]")
-            logger.info(f"Recovered {len(keys)} active download slots")
-        else:
-            console.print(f"[green]Active downloads counter initialized to 0[/green]")
-            
-    except Exception as e:
-        logger.error(f"Failed to recover active downloads: {str(e)}")
-        # Fallback: reset to 0
-        try:
-            await redis_client.set("active_downloads_count", 0)
-        except:
-            pass
+# ============================================================================
+# Startup / Shutdown
+# ============================================================================
 
 @app.on_event("startup")
 async def startup_event():
     """Startup handler"""
-    global redis_client, DENO_VERSION, YTDLP_VERSION, JS_RUNTIME_PATH
     
     console.rule(f"[bold blue]{config.api.title} v{config.api.version}[/bold blue]")
     
     # Display configuration
     console.print(f"[cyan]Configuration:[/cyan]")
     console.print(f"  Redis: {config.redis.url}")
-    console.print(f"  Rate limit: {config.rate_limit.max_requests} req/{config.rate_limit.window_seconds}s (enabled: {config.rate_limit.enabled})")
+    console.print(f"  Rate limit: {config.rate_limit.max_requests} req/{config.rate_limit.window_seconds}s")
     console.print(f"  Max concurrent: {config.download.max_concurrent}")
     console.print(f"  Timeout: {config.download.timeout_seconds}s")
     console.print(f"  SSRF protection: {config.security.enable_ssrf_protection}")
     console.print(f"  Locale: {config.i18n.default_locale}")
     console.print(f"  Log level: {config.logging.level}")
     
-    # JS runtime detection
-    if config.ytdlp.js_runtime:
-        JS_RUNTIME_PATH = config.ytdlp.js_runtime
-        console.print(f"[cyan]{i18n.get('startup.js_runtime_configured', runtime=JS_RUNTIME_PATH)}[/cyan]")
-    else:
-        JS_RUNTIME_PATH = await detect_js_runtime()
-        if JS_RUNTIME_PATH:
-            console.print(f"[green]{i18n.get('startup.js_runtime_detected', runtime=JS_RUNTIME_PATH)}[/green]")
-        else:
-            console.print(f"[yellow]{i18n.get('startup.js_runtime_none')}[/yellow]")
-    
-    # Deno check
-    deno_info = await check_deno_installation()
-    if deno_info["status"] == i18n.get("response.deno_installed"):
-        DENO_VERSION = deno_info["version"]
-        console.print(f"[green]{i18n.get('startup.deno_detected', version=DENO_VERSION)}[/green]")
-    
-    # yt-dlp check
-    try:
-        process = await asyncio.create_subprocess_exec(
-            'yt-dlp', '--version',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5.0)
-        YTDLP_VERSION = stdout.decode().strip()
-        console.print(f"[green]{i18n.get('startup.ytdlp_detected', version=YTDLP_VERSION)}[/green]")
-    except Exception as e:
-        console.print(f"[red]{i18n.get('startup.ytdlp_failed')}[/red]")
-        logger.error(i18n.get("startup.ytdlp_failed"))
-    
-    # Redis connection
-    if REDIS_AVAILABLE:
-        try:
-            redis_client = await aioredis.from_url(
-                config.redis.url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=config.redis.socket_timeout
-            )
-            await redis_client.ping()
-            
-            # Recover active downloads counter from individual keys
-            await recover_active_downloads()
-            
-            console.print(f"[green]{i18n.get('startup.redis_connected')}[/green]")
-            logger.info(i18n.get("startup.redis_connected"))
-        except Exception as e:
-            console.print(f"[yellow]{i18n.get('startup.redis_failed', error=str(e))}[/yellow]")
-            logger.warning(i18n.get("startup.redis_failed", error=str(e)))
-            redis_client = None
-    
-    # Load supported sites
-    asyncio.create_task(load_supported_sites())
+    # Initialize components
+    await init_redis()
+    await init_ytdlp()
+    await init_runtime()
+    asyncio.create_task(init_supported_sites())
     
     console.rule(f"[bold green]{i18n.get('startup.api_ready')}[/bold green]")
 
@@ -730,6 +794,10 @@ async def shutdown_event():
     if redis_client:
         await redis_client.close()
         logger.info(i18n.get("shutdown.redis_closed"))
+
+# ============================================================================
+# Endpoints
+# ============================================================================
 
 @app.get("/", tags=["Health"])
 async def root():
@@ -779,8 +847,6 @@ async def health_check_full():
     except Exception as e:
         raise HTTPException(status_code=503, detail=i18n.get("error.ytdlp_unavailable", reason=str(e)))
     
-    deno_info = await check_deno_installation()
-    
     redis_status = i18n.get("response.redis_disabled")
     active_downloads = 0
     if redis_client:
@@ -791,21 +857,16 @@ async def health_check_full():
         except:
             redis_status = i18n.get("response.redis_disconnected")
     
-    health_data = {
+    return {
         "status": i18n.get("health.status"),
         "ytdlp_version": ytdlp_version,
-        "deno": deno_info,
+        "deno_version": DENO_VERSION,
         "redis_status": redis_status,
         "js_runtime": JS_RUNTIME_PATH,
         "active_downloads": active_downloads,
         "max_downloads": config.download.max_concurrent,
         "supported_sites_loaded": len(SUPPORTED_SITES)
     }
-    
-    if deno_info["status"] != i18n.get("response.deno_installed"):
-        health_data["warning"] = i18n.get("health.warning_no_deno")
-    
-    return health_data
 
 @app.get("/config", tags=["Admin"], dependencies=[Depends(verify_api_key)])
 async def get_config():
@@ -824,10 +885,30 @@ async def get_config():
 
 @app.post("/info", response_model=VideoInfo, tags=["Video Info"], dependencies=[Depends(rate_limiter)])
 async def get_video_info(request: Request, video_request: VideoRequest):
-    """Get video information"""
+    """
+    Get video information with Redis caching.
+    Cache key is based on URL hash to prevent bot abuse.
+    """
     
     locale = get_locale(request.headers.get("accept-language"))
     _ = get_i18n(locale)
+    
+    # SSRF check (moved from validator to endpoint)
+    await SecurityValidator.validate_url(str(video_request.url))
+    
+    # Check cache
+    cache_key = f"info:{hash_stable(str(video_request.url))}"
+    if redis_client:
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                logger.info("Video info served from cache", extra={
+                    "request_id": request.state.request_id,
+                    "url": safe_url_for_log(str(video_request.url))
+                })
+                return VideoInfo(**json.loads(cached))
+        except Exception as e:
+            logger.warning(f"Cache read failed: {str(e)}", extra={"request_id": request.state.request_id})
     
     cmd = YTDLPCommandBuilder.build_info_command(
         str(video_request.url),
@@ -835,7 +916,7 @@ async def get_video_info(request: Request, video_request: VideoRequest):
     )
     
     safe_url = safe_url_for_log(str(video_request.url))
-    logger.info(_("log.fetching_info", url=safe_url))
+    logger.info(_("log.fetching_info", url=safe_url), extra={"request_id": request.state.request_id})
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -850,12 +931,12 @@ async def get_video_info(request: Request, video_request: VideoRequest):
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            logger.error(_("log.info_timeout"))
+            logger.error(_("log.info_timeout"), extra={"request_id": request.state.request_id})
             raise HTTPException(status_code=504, detail=_("error.timeout"))
         
         if process.returncode != 0:
             error_msg = stderr.decode().strip()
-            logger.error(_("log.ytdlp_error", code=process.returncode, message=error_msg))
+            logger.error(_("log.ytdlp_error", code=process.returncode, message=error_msg), extra={"request_id": request.state.request_id})
             raise HTTPException(status_code=400, detail=_("error.fetch_info_failed", reason=error_msg[:200]))
         
         info = json.loads(stdout.decode())
@@ -864,16 +945,17 @@ async def get_video_info(request: Request, video_request: VideoRequest):
         if is_live and not config.ytdlp.enable_live_streams:
             raise HTTPException(status_code=400, detail=_("error.live_not_supported"))
         
-        logger.info(_("log.info_retrieved", title=info.get('title', 'Unknown')))
+        logger.info(_("log.info_retrieved", title=info.get('title', 'Unknown')), extra={"request_id": request.state.request_id})
         
-        # Sort formats by quality (height and filesize)
-        formats = sorted(
-            info.get("formats", []),
-            key=lambda f: (f.get("height") or 0, f.get("filesize") or 0),
-            reverse=True
-        )[:20]
+        # Use heapq for efficient top-N selection
+        all_formats = info.get("formats", [])
+        formats = heapq.nlargest(
+            20,
+            all_formats,
+            key=lambda f: (f.get("height") or 0, f.get("filesize") or 0)
+        )
         
-        return VideoInfo(
+        video_info = VideoInfo(
             title=info.get("title", "Unknown"),
             duration=info.get("duration"),
             ext=info.get("ext", "mp4"),
@@ -895,67 +977,60 @@ async def get_video_info(request: Request, video_request: VideoRequest):
             is_live=is_live
         )
         
+        # Cache result
+        if redis_client:
+            try:
+                await redis_client.setex(
+                    cache_key,
+                    INFO_CACHE_TTL,
+                    video_info.json()
+                )
+            except Exception as e:
+                logger.warning(f"Cache write failed: {str(e)}", extra={"request_id": request.state.request_id})
+        
+        return video_info
+        
     except json.JSONDecodeError as e:
-        logger.error(_("log.json_parse_error", error=str(e)))
+        logger.error(_("log.json_parse_error", error=str(e)), extra={"request_id": request.state.request_id})
         raise HTTPException(status_code=500, detail=_("error.parse_failed"))
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Video info error: {str(e)}")
+        logger.error(f"Video info error: {str(e)}", extra={"request_id": request.state.request_id}, exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/stream", tags=["Download"], dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
 async def stream_video(request: Request, video_request: VideoRequest):
-    """Stream video download"""
+    """
+    Stream video download with optimized single yt-dlp call.
+    Uses --print before_dl to get filesize without extra process.
+    """
     
     locale = get_locale(request.headers.get("accept-language"))
     _ = get_i18n(locale)
+    
+    # SSRF check
+    await SecurityValidator.validate_url(str(video_request.url))
     
     # Convert to intent and get metadata
     intent = video_request.to_intent()
     metadata = FormatDecision.get_metadata(intent)
     
-    # Generate simple filename
-    video_id = hashlib.md5(intent.url.encode()).hexdigest()[:8]
+    # Generate filename
+    video_id = hash_stable(intent.url)[:8]
     filename = f"video_{video_id}.{metadata.ext}"
-    
-    # Try to get approximate filesize for Content-Length header
-    content_length = None
-    try:
-        size_cmd = YTDLPCommandBuilder.build_filesize_command(
-            intent.url,
-            metadata.format_str,
-            JS_RUNTIME_PATH
-        )
-        
-        size_process = await asyncio.create_subprocess_exec(
-            *size_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL
-        )
-        
-        stdout, _ = await asyncio.wait_for(size_process.communicate(), timeout=10.0)
-        
-        if size_process.returncode == 0:
-            size_str = stdout.decode().strip()
-            try:
-                content_length = int(size_str)
-            except:
-                pass
-    except Exception as e:
-        logger.debug(f"Failed to get filesize: {str(e)}")
     
     cmd = YTDLPCommandBuilder.build_stream_command(
         intent.url,
         metadata.format_str,
         JS_RUNTIME_PATH,
         intent.audio_only,
-        intent.audio_format
+        intent.audio_format,
+        include_filesize=True
     )
     
     safe_url = safe_url_for_log(intent.url)
-    logger.info(_("log.starting_stream", url=safe_url, format=metadata.format_str))
+    logger.info(_("log.starting_stream", url=safe_url, format=metadata.format_str), extra={"request_id": request.state.request_id})
     
     process = None
     
@@ -967,7 +1042,17 @@ async def stream_video(request: Request, video_request: VideoRequest):
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        stderr_lines = deque(maxlen=50)
+        # Read filesize from first line (--print before_dl)
+        content_length = None
+        try:
+            first_line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
+            size_str = first_line.decode().strip()
+            if size_str.isdigit():
+                content_length = int(size_str)
+        except:
+            pass
+        
+        stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
         async def drain_stderr():
             """Drain stderr to prevent buffer deadlock"""
@@ -977,17 +1062,18 @@ async def stream_video(request: Request, video_request: VideoRequest):
                     if not line:
                         break
                     decoded = line.decode().strip()
-                    stderr_lines.append(decoded)
+                    # Only collect stderr if we'll need it (on error)
+                    if process.returncode is None or process.returncode != 0:
+                        stderr_lines.append(decoded)
                     if config.logging.level == "DEBUG":
-                        logger.debug(f"yt-dlp: {decoded}")
+                        logger.debug(f"yt-dlp: {decoded}", extra={"request_id": request.state.request_id})
             except:
                 pass
         
         stderr_task = asyncio.create_task(drain_stderr())
         
         async def generate():
-            """Stream generator"""
-            CHUNK_SIZE = 1024 * 1024
+            """Stream generator with optimized chunk size"""
             try:
                 while True:
                     chunk = await process.stdout.read(CHUNK_SIZE)
@@ -995,12 +1081,12 @@ async def stream_video(request: Request, video_request: VideoRequest):
                         break
                     yield chunk
             except asyncio.CancelledError:
-                logger.warning(_("log.client_disconnected", pid=process.pid))
+                logger.warning(_("log.client_disconnected", pid=process.pid), extra={"request_id": request.state.request_id})
                 process.kill()
                 await process.wait()
                 raise
             except Exception as e:
-                logger.error(_("log.stream_error", error=str(e)))
+                logger.error(_("log.stream_error", error=str(e)), extra={"request_id": request.state.request_id}, exc_info=True)
                 process.kill()
                 await process.wait()
                 raise
@@ -1010,12 +1096,12 @@ async def stream_video(request: Request, video_request: VideoRequest):
                     
                     if returncode != 0:
                         error_summary = '\n'.join(stderr_lines)
-                        logger.error(_("log.process_exit_error", code=returncode))
+                        logger.error(_("log.process_exit_error", code=returncode), extra={"request_id": request.state.request_id})
                         if error_summary:
-                            logger.error(f"stderr: {error_summary}")
+                            logger.error(f"stderr: {error_summary}", extra={"request_id": request.state.request_id})
                     
                 except asyncio.TimeoutError:
-                    logger.warning(_("log.process_timeout"))
+                    logger.warning(_("log.process_timeout"), extra={"request_id": request.state.request_id})
                     process.kill()
                     await process.wait()
                 
@@ -1029,9 +1115,9 @@ async def stream_video(request: Request, video_request: VideoRequest):
             'Content-Disposition': f'attachment; filename="{filename}"',
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-cache',
+            'Accept-Ranges': 'none',  # Streaming mode doesn't support ranges
         }
         
-        # Add Content-Length if available
         if content_length:
             headers['Content-Length'] = str(content_length)
         
@@ -1048,7 +1134,7 @@ async def stream_video(request: Request, video_request: VideoRequest):
             process.kill()
             await process.wait()
         
-        logger.error(_("log.stream_error", error=str(e)))
+        logger.error(_("log.stream_error", error=str(e)), extra={"request_id": request.state.request_id}, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/supported-sites", tags=["Info"])
@@ -1064,7 +1150,7 @@ async def get_supported_sites(
     if if_none_match == f'"{SUPPORTED_SITES_ETAG}"':
         return JSONResponse(status_code=304, content={})
     
-    sites = SUPPORTED_SITES
+    sites = list(SUPPORTED_SITES)
     
     if search:
         search_lower = search.lower()
@@ -1084,6 +1170,10 @@ async def get_supported_sites(
     
     return response
 
+# ============================================================================
+# Exception Handlers
+# ============================================================================
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """HTTP exception handler"""
@@ -1091,7 +1181,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     await release_download_slot(request)
     
     safe_url = safe_url_for_log(str(request.url))
-    logger.error(i18n.get("log.http_error", code=exc.status_code, detail=exc.detail, url=safe_url))
+    logger.error(
+        i18n.get("log.http_error", code=exc.status_code, detail=exc.detail, url=safe_url),
+        extra={"request_id": request.state.request_id}
+    )
     
     return JSONResponse(
         status_code=exc.status_code,
@@ -1099,6 +1192,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "error": True,
             "status_code": exc.status_code,
             "detail": exc.detail,
+            "request_id": request.state.request_id,
             "timestamp": datetime.now().isoformat()
         },
         headers=exc.headers or {}
@@ -1106,11 +1200,14 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """General exception handler"""
+    """General exception handler with DEBUG mode support"""
     
     await release_download_slot(request)
     
-    logger.exception(i18n.get("log.unhandled_exception", error=str(exc)))
+    logger.exception(
+        i18n.get("log.unhandled_exception", error=str(exc)),
+        extra={"request_id": request.state.request_id}
+    )
     
     locale = get_locale(request.headers.get("accept-language"))
     _ = get_i18n(locale)
@@ -1126,6 +1223,7 @@ async def general_exception_handler(request: Request, exc: Exception):
                 "detail": _("error.internal"),
                 "exception": str(exc),
                 "traceback": traceback.format_exc(),
+                "request_id": request.state.request_id,
                 "timestamp": datetime.now().isoformat()
             }
         )
@@ -1136,6 +1234,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             "error": True,
             "status_code": 500,
             "detail": _("error.internal"),
+            "request_id": request.state.request_id,
             "timestamp": datetime.now().isoformat()
         }
     )
