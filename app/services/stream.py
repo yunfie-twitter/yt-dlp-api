@@ -4,9 +4,10 @@ from collections import deque
 from contextlib import suppress
 from fastapi import HTTPException
 from app.models.internal import DownloadIntent
-from app.services.ytdlp import YTDLPCommandBuilder
+from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
 from app.services.format import FormatDecision
 from app.utils.hash import hash_stable
+from app.utils.filename import sanitize_filename
 from app.i18n import i18n
 import functools
 
@@ -24,18 +25,35 @@ class StreamService:
         """
         _ = functools.partial(i18n.get, locale=locale)
         
-        metadata = FormatDecision.get_metadata(intent)
+        # Decide format: use custom format if provided, else rely on FormatDecision
+        format_str = FormatDecision.decide(intent)
         
-        # Generate filename
-        video_id = hash_stable(intent.url)[:8]
-        filename = f"video_{video_id}.{metadata.ext}"
+        # Get filename first (synchronous-like but async execution)
+        filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
+        try:
+            # We use a short timeout for filename retrieval
+            result = await SubprocessExecutor.run(filename_cmd, timeout=10.0)
+            if result.returncode == 0:
+                raw_filename = result.stdout.decode().strip()
+                filename = sanitize_filename(raw_filename)
+            else:
+                # Fallback to video_id if filename retrieval fails
+                video_id = hash_stable(intent.url)[:8]
+                # Try to guess extension from format_str or default to mp4
+                ext = 'mp3' if intent.audio_only and 'mp3' in str(intent.audio_format) else 'mp4'
+                filename = f"video_{video_id}.{ext}"
+        except Exception:
+             # Fallback on error
+            video_id = hash_stable(intent.url)[:8]
+            ext = 'mp3' if intent.audio_only and 'mp3' in str(intent.audio_format) else 'mp4'
+            filename = f"video_{video_id}.{ext}"
+
         
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
-            metadata.format_str,
+            format_str,
             intent.audio_only,
             intent.audio_format
-            # Removed include_filesize=True to prevent stdout corruption
         )
         
         process = await asyncio.create_subprocess_exec(
@@ -45,10 +63,7 @@ class StreamService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        # Previously we tried to read filesize from the first line of stdout
-        # But this is unreliable and corrupts binary stream if yt-dlp doesn't output it exactly as expected
-        # or if it outputs warning messages first.
-        # We now rely on chunked transfer encoding (no Content-Length) which is safer for streaming.
+        # We rely on chunked transfer encoding (no Content-Length)
         content_length = None
         
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
@@ -90,9 +105,6 @@ class StreamService:
                     
                     if returncode != 0:
                         error_summary = '\n'.join(stderr_lines)
-                        # Only raise if we haven't yielded any data yet?
-                        # If we already yielded, we can't change status code.
-                        # But for now let's raise to be safe, client will get incomplete stream error.
                         raise HTTPException(status_code=500, detail=f"Stream failed: {error_summary[:200]}")
                     
                 except asyncio.TimeoutError:
@@ -103,8 +115,12 @@ class StreamService:
                 with suppress(asyncio.CancelledError):
                     await stderr_task
         
+        # Ensure filename is quoted properly for Content-Disposition
+        # Escape double quotes in filename just in case sanitize missed something or for extra safety
+        safe_filename = filename.replace('"', '\\"')
+        
         headers = {
-            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Disposition': f'attachment; filename="{safe_filename}"',
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-cache',
             'Accept-Ranges': 'none',
