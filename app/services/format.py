@@ -1,4 +1,4 @@
-from app.models.internal import DownloadIntent, MediaMetadata, AudioFormat
+from app.models.internal import DownloadIntent, MediaMetadata
 from app.config.settings import config
 
 class FormatDecision:
@@ -13,12 +13,18 @@ class FormatDecision:
             return f"{intent.custom_format}/{config.ytdlp.default_format}"
         
         if intent.audio_only:
-            if intent.audio_format == AudioFormat.mp3:
-                return 'bestaudio'
-            elif intent.audio_format == AudioFormat.m4a:
+            # Logic updated to support string formats directly or simple presets
+            af = str(intent.audio_format).lower() if intent.audio_format else ""
+            
+            if 'mp3' in af:
+                return 'bestaudio' # yt-dlp will convert if -x --audio-format mp3 is passed
+            elif 'm4a' in af:
                 return 'bestaudio[ext=m4a]/bestaudio'
-            else:  # opus
+            elif 'opus' in af:
                 return 'bestaudio[ext=webm]/bestaudio'
+            else:
+                # Default audio strategy
+                return 'bestaudio/best'
         
         if intent.quality:
             return (
@@ -34,22 +40,17 @@ class FormatDecision:
         format_str = FormatDecision.decide(intent)
         
         if intent.custom_format:
-            # When custom format is used, we can't be sure about the extension
-            # But usually mp4 is a safe default for container if not specified
-            # Ideally we would detect this from format_str, but for now fallback to mp4
-            # If the user specified an audio-only format_id, ext might be wrong here
-            # but yt-dlp will output the correct file extension anyway.
-            # The filename extension in Content-Disposition is a hint.
             return MediaMetadata(
                 format_str=format_str,
-                ext='mp4',
+                ext='mp4', # Default fallback, actual file extension determined by yt-dlp
                 media_type='application/octet-stream'
             )
         
         if intent.audio_only:
-            if intent.audio_format == AudioFormat.mp3:
+            af = str(intent.audio_format).lower() if intent.audio_format else ""
+            if 'mp3' in af:
                 return MediaMetadata(format_str=format_str, ext='mp3', media_type='audio/mpeg')
-            elif intent.audio_format == AudioFormat.m4a:
+            elif 'm4a' in af:
                 return MediaMetadata(format_str=format_str, ext='m4a', media_type='audio/mp4')
             else:
                 return MediaMetadata(format_str=format_str, ext='webm', media_type='audio/webm')
