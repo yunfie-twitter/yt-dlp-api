@@ -2,6 +2,7 @@ import asyncio
 from typing import AsyncIterator, Optional
 from collections import deque
 from contextlib import suppress
+from urllib.parse import quote
 from fastapi import HTTPException
 from app.models.internal import DownloadIntent
 from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
@@ -115,12 +116,11 @@ class StreamService:
                 with suppress(asyncio.CancelledError):
                     await stderr_task
         
-        # Ensure filename is quoted properly for Content-Disposition
-        # Escape double quotes in filename just in case sanitize missed something or for extra safety
-        safe_filename = filename.replace('"', '\\"')
+        # Use RFC 5987 encoding for non-ASCII filenames
+        encoded_filename = quote(filename)
         
         headers = {
-            'Content-Disposition': f'attachment; filename="{safe_filename}"',
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-cache',
             'Accept-Ranges': 'none',
