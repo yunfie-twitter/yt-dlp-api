@@ -40,7 +40,12 @@ class DownloadService:
         # Priority: custom_format (video) > audio_format (audio) > default (FormatDecision)
         format_str = intent.custom_format
         
-        if not format_str and intent.audio_format:
+        # If both custom video format and audio format are provided, and we are not in audio-only mode,
+        # we must combine them (e.g. "399+249") to get both streams.
+        if intent.custom_format and intent.audio_format and not intent.audio_only:
+             format_str = f"{intent.custom_format}+{intent.audio_format}"
+        
+        elif not format_str and intent.audio_format:
             format_str = intent.audio_format
             
         if not format_str:
