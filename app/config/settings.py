@@ -43,6 +43,7 @@ class ApiConfig(BaseModel):
     description: str = Field(default="Production-ready yt-dlp streaming API", description="API description")
     version: str = Field(default="4.0.0", description="API version")
     cors_origins: list = Field(default=["*"], description="CORS allowed origins")
+    debug: bool = Field(default=False, description="Enable debug mode")
 
 class Config(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
