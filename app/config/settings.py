@@ -28,6 +28,7 @@ class YtDlpConfig(BaseModel):
     default_format: str = Field(default="best", description="Default video format")
     default_audio_format: str = Field(default="opus", description="Default audio format")
     enable_live_streams: bool = Field(default=False, description="Allow live stream downloads")
+    enable_gpu: bool = Field(default=False, description="Enable GPU acceleration for conversion (NVENC)")
 
 class LoggingConfig(BaseModel):
     level: str = Field(default="INFO", description="Log level")
