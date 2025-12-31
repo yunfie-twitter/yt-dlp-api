@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse, Response
 from app.models.request import InfoRequest
 from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
 from app.core.security import SecurityValidator, UrlValidationResult
-from app.core.logging import log_error
+from app.core.logging import log_error, log_info
 from app.infra.rate_limit import rate_limiter
 from app.utils.locale import get_locale
 from app.i18n import i18n
@@ -81,14 +81,13 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
 
     # Get direct stream URL (m3u8 preferred)
+    # Using YTDLPCommandBuilder.build_get_url_command which already requests 'best[protocol^=m3u8]/best'
     cmd = YTDLPCommandBuilder.build_get_url_command(str(video_request.url))
     try:
         result = await SubprocessExecutor.run(cmd, timeout=30.0)
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail="Failed to get stream URL")
         
-        # Output might contain multiple URLs (video + audio), take the first one
-        # Ideally we check for m3u8
         urls = result.stdout.decode().strip().split("\n")
         m3u8_url = urls[0] if urls else None
         
@@ -99,55 +98,70 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         log_error(request, f"Get URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Fetch playlist (use the same proxy logic headers; allow caching by TTL)
+    # Rewrite segments/playlists to point to /proxy
+    base_url = str(request.base_url).rstrip("/")
+    proxy_endpoint = f"{base_url}/stream/proxy"
+
+    # Fetch playlist
     try:
         upstream_headers = fingerprint_headers(m3u8_url, request)
         resp = await client.get(m3u8_url, headers=upstream_headers)
         resp.raise_for_status()
         
-        # Content-Type check: If it's not a playlist, it might be a direct file (mp4/webm)
+        # Check if it's actually a playlist
         ct = resp.headers.get("content-type", "").lower()
-        if "mpegurl" not in ct and "application/x-mpegurl" not in ct and "vnd.apple.mpegurl" not in ct:
-            # Check content start to be sure (M3U8 must start with #EXTM3U)
-            # Peek first few bytes
-            first_line = resp.content[:7]
-            if first_line != b"#EXTM3U":
-                 # Not a playlist, just redirect or proxy?
-                 # Since this endpoint expects to return a playlist pointing to proxy,
-                 # if we got a direct file, we should probably just return it or redirect.
-                 # Simple redirect is best for direct files.
-                 return Response(status_code=307, headers={"Location": m3u8_url})
+        is_playlist = "mpegurl" in ct or "application/x-mpegurl" in ct or "vnd.apple.mpegurl" in ct
+        if not is_playlist:
+             first_line = resp.content[:7]
+             if first_line == b"#EXTM3U":
+                 is_playlist = True
 
-        content = resp.text
+        if not is_playlist:
+            # If yt-dlp returned a direct file link (mp4/webm) instead of m3u8,
+            # we wrap it in a simple m3u8 playlist so the client still gets a playlist as expected.
+            # This handles cases where 'best[protocol^=m3u8]' fell back to 'best' (direct file).
+            encoded_url = quote(m3u8_url, safe="")
+            proxy_url = f"{proxy_endpoint}?url={encoded_url}"
+            
+            # Create a simple VOD playlist wrapping the single file
+            # Note: This is a hack. Some players might not like a full MP4 as a segment,
+            # but it works for many simple HLS players or if we proxy it progressively.
+            new_content = (
+                "#EXTM3U\n"
+                "#EXT-X-VERSION:3\n"
+                "#EXT-X-TARGETDURATION:0\n"
+                "#EXT-X-MEDIA-SEQUENCE:0\n"
+                "#EXTINF:10.0,\n"
+                f"{proxy_url}\n"
+                "#EXT-X-ENDLIST\n"
+            )
+            # Log this fallback
+            log_info(request, f"Wrapped direct stream in generated m3u8: {m3u8_url}")
+        else:
+            # It is a playlist, rewrite it
+            content = resp.text
+            rewritten_lines: list[str] = []
+            for raw_line in content.splitlines():
+                line = raw_line.rstrip("\r\n")
+
+                if line.startswith("#") or line.strip() == "":
+                    rewritten_lines.append(line)
+                    continue
+                
+                try:
+                    absolute_url = urljoin(m3u8_url, line.strip())
+                    encoded_url = quote(absolute_url, safe="")
+                    rewritten_lines.append(f"{proxy_endpoint}?url={encoded_url}")
+                except ValueError:
+                    log_error(request, f"Skipping invalid URL in playlist: {line[:50]}...")
+                    continue
+
+            new_content = "\n".join(rewritten_lines) + "\n"
+
     except Exception as e:
         log_error(request, f"Fetch m3u8 error: {str(e)}")
         raise HTTPException(status_code=502, detail="Failed to fetch upstream playlist")
 
-    # Rewrite segments/playlists to point to /proxy
-    base_url = str(request.base_url).rstrip("/")
-    proxy_endpoint = f"{base_url}/stream/proxy"
-
-    rewritten_lines: list[str] = []
-    for raw_line in content.splitlines():
-        line = raw_line.rstrip("\r\n")
-
-        if line.startswith("#") or line.strip() == "":
-            rewritten_lines.append(line)
-            continue
-        
-        # Handle relative URLs correctly and catch parsing errors
-        try:
-            absolute_url = urljoin(m3u8_url, line.strip())
-            encoded_url = quote(absolute_url, safe="")
-            rewritten_lines.append(f"{proxy_endpoint}?url={encoded_url}")
-        except ValueError:
-            # Skip invalid URLs (e.g. malformed IPv6) instead of crashing
-            log_error(request, f"Skipping invalid URL in playlist: {line[:50]}...")
-            continue
-
-    new_content = "\n".join(rewritten_lines) + "\n"
-
-    # HLS playlist should be short TTL
     headers = {
         "Cache-Control": "public, max-age=5",
         "Content-Disposition": "inline; filename=playlist.m3u8",
