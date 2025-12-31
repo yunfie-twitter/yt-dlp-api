@@ -3,7 +3,6 @@ from dataclasses import dataclass
 import asyncio
 from app.config.settings import config
 from app.core.state import state
-from app.models.internal import AudioFormat
 
 class CompletedProcess(NamedTuple):
     """Subprocess result"""
@@ -124,7 +123,7 @@ class YTDLPCommandBuilder:
         url: str,
         format_str: str,
         audio_only: bool,
-        audio_format: AudioFormat
+        file_format: Optional[str] = None
     ) -> List[str]:
         """Build command for streaming download"""
         cmd = [
@@ -149,7 +148,16 @@ class YTDLPCommandBuilder:
         cmd.append('--no-progress')
         cmd.append('--quiet') # Suppress other outputs
         
-        if audio_only and audio_format == AudioFormat.mp3:
-            cmd.extend(['-x', '--audio-format', 'mp3'])
+        if audio_only:
+            # Extract audio
+            cmd.append('-x')
+            # If file_format is provided (e.g. mp3, m4a), use it as target audio format
+            if file_format:
+                cmd.extend(['--audio-format', file_format])
+        else:
+            # Video mode
+            # If file_format is provided (e.g. mp4, mkv), attempt to remux
+            if file_format:
+                cmd.extend(['--remux-video', file_format])
         
         return cmd
