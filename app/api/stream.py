@@ -100,7 +100,8 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
 
     # Rewrite segments/playlists to point to /proxy
     base_url = str(request.base_url).rstrip("/")
-    proxy_endpoint = f"{base_url}/stream/proxy"
+    # Proxy endpoint is at /proxy (not /stream/proxy) because router is included at root level for these paths
+    proxy_endpoint = f"{base_url}/proxy"
 
     # Fetch playlist
     try:
@@ -124,8 +125,6 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             proxy_url = f"{proxy_endpoint}?url={encoded_url}"
             
             # Create a simple VOD playlist wrapping the single file
-            # Note: This is a hack. Some players might not like a full MP4 as a segment,
-            # but it works for many simple HLS players or if we proxy it progressively.
             new_content = (
                 "#EXTM3U\n"
                 "#EXT-X-VERSION:3\n"
