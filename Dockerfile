@@ -47,6 +47,9 @@ COPY --from=builder /install /usr/local
 # appディレクトリをコピー
 COPY ./app /app/app
 
+# 設定ファイル用ディレクトリを作成して権限を付与
+RUN mkdir -p /config && chown -R appuser:appuser /config
+
 RUN chown -R appuser:appuser /app
 
 # Denoキャッシュディレクトリ
