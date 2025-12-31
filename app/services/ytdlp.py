@@ -136,8 +136,6 @@ class YTDLPCommandBuilder:
             '--retries', str(config.download.retries),
         ]
         
-        # NOTE: Do NOT use --print here as it mixes with binary output in stdout
-        
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
         
@@ -151,13 +149,16 @@ class YTDLPCommandBuilder:
         if audio_only:
             # Extract audio
             cmd.append('-x')
-            # If file_format is provided (e.g. mp3, m4a), use it as target audio format
             if file_format:
                 cmd.extend(['--audio-format', file_format])
         else:
             # Video mode
-            # If file_format is provided (e.g. mp4, mkv), attempt to remux
             if file_format:
                 cmd.extend(['--remux-video', file_format])
-        
+                # If GPU enabled and converting video, add HW accel args
+                if config.ytdlp.enable_gpu:
+                     # Use NVENC for H264 conversion (common for mp4/mkv)
+                     # Note: This is a best-effort configuration for NVENC
+                     cmd.extend(['--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc -preset p4'])
+
         return cmd
