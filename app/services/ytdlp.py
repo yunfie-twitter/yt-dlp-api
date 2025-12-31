@@ -78,6 +78,25 @@ class YTDLPCommandBuilder:
         return cmd
     
     @staticmethod
+    def build_filename_command(url: str, format_str: str) -> List[str]:
+        """Build command for fetching filename"""
+        cmd = [
+            'yt-dlp',
+            '--get-filename',
+            '-o', '%(title)s.%(ext)s',
+            '--no-playlist',
+            '--socket-timeout', str(config.download.socket_timeout),
+            '--retries', str(config.download.retries),
+            '-f', format_str,
+            url
+        ]
+        
+        if state.js_runtime:
+            cmd.extend(['--js-runtimes', state.js_runtime])
+            
+        return cmd
+
+    @staticmethod
     def build_stream_command(
         url: str,
         format_str: str,
