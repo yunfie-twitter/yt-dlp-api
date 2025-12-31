@@ -9,10 +9,10 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
-from config.settings import config
-from core.state import state
-from infra.redis import init_redis, close_redis
-from api import health, info, stream, admin
+from app.config.settings import config
+from app.core.state import state
+from app.infra.redis import init_redis, close_redis
+from app.api import health, info, stream, admin
 
 console = Console()
 
