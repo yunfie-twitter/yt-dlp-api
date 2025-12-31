@@ -1,7 +1,8 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import health, info, download, stream, admin
-from app.config.settings import config
+from app.config.settings import config, CONFIG_PATH
 from app.core.state import state
 from app.infra.redis import init_redis, close_redis
 
@@ -30,6 +31,15 @@ app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 @app.on_event("startup")
 async def startup_event():
+    # Ensure config directory exists and file is created if missing
+    config_dir = os.path.dirname(CONFIG_PATH)
+    if config_dir and not os.path.exists(config_dir):
+        os.makedirs(config_dir, exist_ok=True)
+    
+    # Reload config to ensure file creation if it didn't exist
+    if not os.path.exists(CONFIG_PATH):
+        config.save_to_file(CONFIG_PATH)
+
     state.redis = await init_redis()
 
 @app.on_event("shutdown")
