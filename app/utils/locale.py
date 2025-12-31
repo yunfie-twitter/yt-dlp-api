@@ -1,6 +1,6 @@
 from typing import Optional
 from urllib.parse import urlparse
-from config.settings import config
+from app.config.settings import config
 
 def get_locale(accept_language: Optional[str] = None) -> str:
     """Extract locale from Accept-Language header"""

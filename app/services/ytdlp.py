@@ -1,9 +1,9 @@
 from typing import List, Optional, NamedTuple
 from dataclasses import dataclass
 import asyncio
-from config.settings import config
-from core.state import state
-from models.internal import AudioFormat
+from app.config.settings import config
+from app.core.state import state
+from app.models.internal import AudioFormat
 
 class CompletedProcess(NamedTuple):
     """Subprocess result"""

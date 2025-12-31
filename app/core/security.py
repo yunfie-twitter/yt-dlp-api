@@ -4,9 +4,9 @@ import socket
 import ipaddress
 import asyncio
 from typing import Optional
-from config.settings import config
-from infra.redis import get_redis
-from utils.hash import hash_stable
+from app.config.settings import config
+from app.infra.redis import get_redis
+from app.utils.hash import hash_stable
 
 SSRF_CACHE_TTL = 300
 

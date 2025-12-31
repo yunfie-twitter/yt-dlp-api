@@ -1,5 +1,5 @@
-from models.internal import DownloadIntent, MediaMetadata, AudioFormat
-from config.settings import config
+from app.models.internal import DownloadIntent, MediaMetadata, AudioFormat
+from app.config.settings import config
 
 class FormatDecision:
     """Make format decisions"""

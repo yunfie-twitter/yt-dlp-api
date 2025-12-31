@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from models.request import VideoRequest
-from services.stream import StreamService
-from core.security import SecurityValidator, UrlValidationResult
-from core.logging import log_info, log_error
-from infra.rate_limit import rate_limiter
-from infra.concurrency import concurrency_limiter, release_download_slot
-from utils.locale import get_locale, safe_url_for_log
-from i18n import i18n
+from app.models.request import VideoRequest
+from app.services.stream import StreamService
+from app.core.security import SecurityValidator, UrlValidationResult
+from app.core.logging import log_info, log_error
+from app.infra.rate_limit import rate_limiter
+from app.infra.concurrency import concurrency_limiter, release_download_slot
+from app.utils.locale import get_locale, safe_url_for_log
+from app.i18n import i18n
 import functools
 
 router = APIRouter()

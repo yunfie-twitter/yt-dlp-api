@@ -1,13 +1,15 @@
+import asyncio
 import json
 import heapq
 from typing import Optional
 from fastapi import HTTPException
-from models.request import VideoRequest
-from models.response import VideoInfo
-from services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
-from infra.redis import get_redis
-from utils.hash import hash_stable
-from i18n import i18n
+from app.config.settings import config
+from app.models.request import VideoRequest
+from app.models.response import VideoInfo
+from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
+from app.infra.redis import get_redis
+from app.utils.hash import hash_stable
+from app.i18n import i18n
 import functools
 
 INFO_CACHE_TTL = 300
