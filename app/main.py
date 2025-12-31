@@ -6,16 +6,16 @@ from app.core.state import state
 from app.infra.redis import init_redis, close_redis
 
 app = FastAPI(
-    title="yt-dlp API",
-    version="1.0.0",
-    docs_url="/docs" if config.app.debug else None,
+    title=config.api.title,
+    version=config.api.version,
+    docs_url="/docs" if config.api.debug else None,
     redoc_url=None
 )
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.api.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
