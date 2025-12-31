@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
-from models.request import VideoRequest
-from models.response import VideoInfo
-from services.info import VideoInfoService
-from core.security import SecurityValidator, UrlValidationResult
-from core.logging import log_info, log_error
-from infra.rate_limit import rate_limiter
-from utils.locale import get_locale, safe_url_for_log
-from i18n import i18n
+from app.models.request import VideoRequest
+from app.models.response import VideoInfo
+from app.services.info import VideoInfoService
+from app.core.security import SecurityValidator, UrlValidationResult
+from app.core.logging import log_info, log_error
+from app.infra.rate_limit import rate_limiter
+from app.utils.locale import get_locale, safe_url_for_log
+from app.i18n import i18n
 import functools
 
 router = APIRouter()
