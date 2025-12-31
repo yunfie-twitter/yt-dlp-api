@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import AsyncIterator, Optional
 from collections import deque
 from contextlib import suppress
@@ -35,9 +36,17 @@ class DownloadService:
         """
         _ = functools.partial(i18n.get, locale=locale)
         
-        # Decide format: use custom format if provided, else rely on FormatDecision
-        format_str = FormatDecision.decide(intent)
+        # 1. Determine Format String
+        # Priority: custom_format (video) > audio_format (audio) > default (FormatDecision)
+        format_str = intent.custom_format
         
+        if not format_str and intent.audio_format:
+            format_str = intent.audio_format
+            
+        if not format_str:
+            format_str = FormatDecision.decide(intent)
+        
+        # 2. Get Filename (metadata)
         # Get filename first (synchronous-like but async execution)
         filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
         try:
@@ -46,24 +55,34 @@ class DownloadService:
             if result.returncode == 0:
                 raw_filename = result.stdout.decode().strip()
                 filename = sanitize_filename(raw_filename)
+                
+                # Force extension if file_format is specified
+                if intent.file_format:
+                    root, _ = os.path.splitext(filename)
+                    # Clean any double extension if present
+                    filename = f"{root}.{intent.file_format}"
+                    
             else:
-                # Fallback to video_id if filename retrieval fails
-                video_id = hash_stable(intent.url)[:8]
-                # Try to guess extension from format_str or default to mp4
-                ext = 'mp3' if intent.audio_only and 'mp3' in str(intent.audio_format) else 'mp4'
-                filename = f"video_{video_id}.{ext}"
+                raise Exception("Filename retrieval failed")
         except Exception:
              # Fallback on error
             video_id = hash_stable(intent.url)[:8]
-            ext = 'mp3' if intent.audio_only and 'mp3' in str(intent.audio_format) else 'mp4'
+            # Try to guess extension
+            if intent.file_format:
+                ext = intent.file_format
+            elif intent.audio_only:
+                ext = 'mp3' # Default fallback for audio
+            else:
+                ext = 'mp4' # Default fallback for video
             filename = f"video_{video_id}.{ext}"
 
-        
+        # 3. Build Stream Command
+        # Pass file_format to enable remuxing (video) or conversion (audio)
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
             intent.audio_only,
-            intent.audio_format
+            intent.file_format
         )
         
         process = await asyncio.create_subprocess_exec(
