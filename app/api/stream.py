@@ -103,7 +103,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
 
     # Rewrite segments/playlists to point to /proxy
     base_url = str(request.base_url).rstrip("/")
-    proxy_endpoint = f"{base_url}/proxy"
+    proxy_endpoint = f"{base_url}/stream/proxy"
 
     rewritten_lines: list[str] = []
     for raw_line in content.splitlines():
@@ -112,10 +112,16 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         if line.startswith("#") or line.strip() == "":
             rewritten_lines.append(line)
             continue
-
-        absolute_url = urljoin(m3u8_url, line.strip())
-        encoded_url = quote(absolute_url, safe="")
-        rewritten_lines.append(f"{proxy_endpoint}?url={encoded_url}")
+        
+        # Handle relative URLs correctly and catch parsing errors
+        try:
+            absolute_url = urljoin(m3u8_url, line.strip())
+            encoded_url = quote(absolute_url, safe="")
+            rewritten_lines.append(f"{proxy_endpoint}?url={encoded_url}")
+        except ValueError:
+            # Skip invalid URLs (e.g. malformed IPv6) instead of crashing
+            log_error(request, f"Skipping invalid URL in playlist: {line[:50]}...")
+            continue
 
     new_content = "\n".join(rewritten_lines) + "\n"
 
