@@ -19,13 +19,14 @@ services:
     volumes:
       - ./config:/config
       - deno_cache:/home/appuser/.cache/deno
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu, utility, video]
+    # GPU support: Uncomment the following section ONLY if you have NVIDIA Container Toolkit installed
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, utility, video]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
