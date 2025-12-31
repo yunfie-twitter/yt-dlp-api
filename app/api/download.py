@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from typing import AsyncIterator, Optional
 from collections import deque
 from contextlib import suppress
@@ -29,60 +30,56 @@ class DownloadService:
     """Video download service"""
     
     @staticmethod
-    async def download(intent: DownloadIntent, locale: str) -> tuple[AsyncIterator[bytes], dict, Optional[int]]:
+    async def download(intent: DownloadIntent, locale: str, request: Request) -> tuple[AsyncIterator[bytes], dict, Optional[int]]:
         """
         Stream video download with single yt-dlp call.
         Returns (generator, headers, content_length)
         """
         _ = functools.partial(i18n.get, locale=locale)
+        safe_url = safe_url_for_log(intent.url)
         
         # 1. Determine Format String
-        # Priority: custom_format (video) > audio_format (audio) > default (FormatDecision)
         format_str = intent.custom_format
         
-        # If both custom video format and audio format are provided, and we are not in audio-only mode,
-        # we must combine them (e.g. "399+249") to get both streams.
         if intent.custom_format and intent.audio_format and not intent.audio_only:
              format_str = f"{intent.custom_format}+{intent.audio_format}"
-        
         elif not format_str and intent.audio_format:
             format_str = intent.audio_format
             
         if not format_str:
             format_str = FormatDecision.decide(intent)
+            
+        log_info(request, f"Format decided: {format_str} for {safe_url}")
         
         # 2. Get Filename (metadata)
-        # Get filename first (synchronous-like but async execution)
         filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
         try:
-            # We use a short timeout for filename retrieval
-            result = await SubprocessExecutor.run(filename_cmd, timeout=10.0)
+            log_info(request, f"Fetching filename for {safe_url}")
+            result = await SubprocessExecutor.run(filename_cmd, timeout=15.0)
             if result.returncode == 0:
                 raw_filename = result.stdout.decode().strip()
                 filename = sanitize_filename(raw_filename)
                 
-                # Force extension if file_format is specified
                 if intent.file_format:
                     root, _ = os.path.splitext(filename)
-                    # Clean any double extension if present
                     filename = f"{root}.{intent.file_format}"
-                    
+                log_info(request, f"Filename resolved: {filename}")
             else:
+                log_error(request, f"Filename fetch failed: {result.stderr.decode()[:200]}")
                 raise Exception("Filename retrieval failed")
-        except Exception:
-             # Fallback on error
+        except Exception as e:
+            log_error(request, f"Filename error: {str(e)}")
             video_id = hash_stable(intent.url)[:8]
-            # Try to guess extension
             if intent.file_format:
                 ext = intent.file_format
             elif intent.audio_only:
-                ext = 'mp3' # Default fallback for audio
+                ext = 'mp3'
             else:
-                ext = 'mp4' # Default fallback for video
+                ext = 'mp4'
             filename = f"video_{video_id}.{ext}"
+            log_info(request, f"Fallback filename: {filename}")
 
         # 3. Build Stream Command
-        # Pass file_format to enable remuxing (video) or conversion (audio)
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
@@ -90,6 +87,7 @@ class DownloadService:
             intent.file_format
         )
         
+        log_info(request, f"Starting download process for {safe_url}")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -97,19 +95,18 @@ class DownloadService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        # We rely on chunked transfer encoding (no Content-Length)
         content_length = None
-        
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
         async def drain_stderr():
-            """Drain stderr to prevent buffer deadlock"""
             try:
                 while True:
                     line = await process.stderr.readline()
                     if not line:
                         break
                     decoded = line.decode().strip()
+                    # Log critical errors or progress if needed (verbose)
+                    # log_info(request, f"yt-dlp stderr: {decoded}")
                     if process.returncode is None or process.returncode != 0:
                         stderr_lines.append(decoded)
             except:
@@ -118,29 +115,39 @@ class DownloadService:
         stderr_task = asyncio.create_task(drain_stderr())
         
         async def generate():
-            """Stream generator"""
+            start_time = time.time()
+            bytes_transferred = 0
             try:
                 while True:
                     chunk = await process.stdout.read(CHUNK_SIZE)
                     if not chunk:
                         break
+                    bytes_transferred += len(chunk)
+                    # Log every 10MB approx
+                    if bytes_transferred % (10 * 1024 * 1024) < CHUNK_SIZE:
+                         log_info(request, f"Transferring {safe_url}: {bytes_transferred / 1024 / 1024:.1f} MB")
                     yield chunk
+                
+                duration = time.time() - start_time
+                log_info(request, f"Download completed: {safe_url} ({bytes_transferred / 1024 / 1024:.1f} MB in {duration:.1f}s)")
+                
             except asyncio.CancelledError:
+                log_info(request, f"Download cancelled: {safe_url}")
                 process.kill()
                 await process.wait()
                 raise
             except Exception as e:
+                log_error(request, f"Stream error: {str(e)}")
                 process.kill()
                 await process.wait()
                 raise HTTPException(status_code=500, detail=str(e))
             finally:
                 try:
                     returncode = await asyncio.wait_for(process.wait(), timeout=5.0)
-                    
                     if returncode != 0:
                         error_summary = '\n'.join(stderr_lines)
+                        log_error(request, f"yt-dlp failed with code {returncode}: {error_summary[:200]}")
                         raise HTTPException(status_code=500, detail=f"Download failed: {error_summary[:200]}")
-                    
                 except asyncio.TimeoutError:
                     process.kill()
                     await process.wait()
@@ -149,9 +156,7 @@ class DownloadService:
                 with suppress(asyncio.CancelledError):
                     await stderr_task
         
-        # Use RFC 5987 encoding for non-ASCII filenames
         encoded_filename = quote(filename)
-        
         headers = {
             'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
             'X-Content-Type-Options': 'nosniff',
@@ -171,9 +176,7 @@ async def download_video(request: Request, video_request: VideoRequest):
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
     
-    # SSRF check
     validation_result = await SecurityValidator.validate_url(str(video_request.url))
-    
     if validation_result == UrlValidationResult.BLOCKED:
         await release_download_slot(request)
         raise HTTPException(status_code=403, detail=_("error.private_ip"))
@@ -183,14 +186,13 @@ async def download_video(request: Request, video_request: VideoRequest):
         raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
     
     intent = video_request.to_intent()
-    
     safe_url = safe_url_for_log(intent.url)
     log_info(request, _("log.starting_stream", url=safe_url, format="download"))
     
     try:
-        generator, headers, content_length = await DownloadService.download(intent, locale)
+        # Pass request object for logging
+        generator, headers, content_length = await DownloadService.download(intent, locale, request)
         
-        # Wrap generator to ensure cleanup
         async def wrapped_generator():
             try:
                 async for chunk in generator:
