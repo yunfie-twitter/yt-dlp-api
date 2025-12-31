@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Security
 from fastapi.security import APIKeyHeader
 from fastapi import HTTPException
-from config.settings import config
+from app.config.settings import config
 import os
 
 router = APIRouter()

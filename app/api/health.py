@@ -1,7 +1,7 @@
 from fastapi import APIRouter
-from infra.redis import get_redis
-from core.state import state
-from i18n import i18n
+from app.infra.redis import get_redis
+from app.core.state import state
+from app.i18n import i18n
 
 router = APIRouter()
 
