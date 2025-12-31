@@ -43,6 +43,10 @@ RUN useradd -m -u 1000 appuser
 # Builderステージからライブラリをコピーし、権限をappuserに譲渡する
 # /usr/local にコピーすることで、パスを意識せずに利用可能にします
 COPY --from=builder /install /usr/local
+
+# appディレクトリをコピー
+COPY ./app /app/app
+
 RUN chown -R appuser:appuser /app
 
 # Denoキャッシュディレクトリ
