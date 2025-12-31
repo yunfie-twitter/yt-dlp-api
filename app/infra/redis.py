@@ -1,8 +1,8 @@
 from typing import Optional
 import redis.asyncio as aioredis
 from rich.console import Console
-from config.settings import config
-from core.state import state
+from app.config.settings import config
+from app.core.state import state
 
 console = Console()
 

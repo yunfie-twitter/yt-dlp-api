@@ -1,9 +1,9 @@
 from fastapi import HTTPException, Request
 import uuid
-from infra.redis import get_redis
-from config.settings import config
-from utils.locale import get_locale
-from i18n import i18n
+from app.infra.redis import get_redis
+from app.config.settings import config
+from app.utils.locale import get_locale
+from app.i18n import i18n
 import functools
 
 class ConcurrencyLimiter:
