@@ -92,8 +92,18 @@ class VideoInfoService:
             )
             
             video_info = VideoInfo(
+                id=info.get("id"),
                 title=info.get("title", "Unknown"),
+                description=info.get("description"),
                 duration=info.get("duration"),
+                view_count=info.get("view_count"),
+                like_count=info.get("like_count"),
+                comment_count=info.get("comment_count"),
+                uploader=info.get("uploader"),
+                channel=info.get("channel"),
+                channel_id=info.get("channel_id"),
+                age_limit=info.get("age_limit"),
+                subtitles=info.get("subtitles"),
                 ext=info.get("ext", "mp4"),
                 filesize=info.get("filesize"),
                 formats=[
@@ -108,7 +118,6 @@ class VideoInfoService:
                     for f in selected_formats
                 ],
                 thumbnail=info.get("thumbnail"),
-                uploader=info.get("uploader"),
                 webpage_url=info.get("webpage_url", str(video_request.url)),
                 is_live=is_live
             )
