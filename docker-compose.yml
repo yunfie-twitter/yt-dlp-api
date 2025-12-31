@@ -19,6 +19,13 @@ services:
     volumes:
       - ./config.json:/app/config.json:ro
       - deno_cache:/home/appuser/.cache/deno
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, utility, video]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
