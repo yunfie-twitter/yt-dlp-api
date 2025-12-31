@@ -34,8 +34,8 @@ class StreamService:
             intent.url,
             metadata.format_str,
             intent.audio_only,
-            intent.audio_format,
-            include_filesize=True
+            intent.audio_format
+            # Removed include_filesize=True to prevent stdout corruption
         )
         
         process = await asyncio.create_subprocess_exec(
@@ -45,15 +45,11 @@ class StreamService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        # Read filesize from first line
+        # Previously we tried to read filesize from the first line of stdout
+        # But this is unreliable and corrupts binary stream if yt-dlp doesn't output it exactly as expected
+        # or if it outputs warning messages first.
+        # We now rely on chunked transfer encoding (no Content-Length) which is safer for streaming.
         content_length = None
-        try:
-            first_line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
-            size_str = first_line.decode().strip()
-            if size_str.isdigit():
-                content_length = int(size_str)
-        except:
-            pass
         
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
@@ -94,6 +90,9 @@ class StreamService:
                     
                     if returncode != 0:
                         error_summary = '\n'.join(stderr_lines)
+                        # Only raise if we haven't yielded any data yet?
+                        # If we already yielded, we can't change status code.
+                        # But for now let's raise to be safe, client will get incomplete stream error.
                         raise HTTPException(status_code=500, detail=f"Stream failed: {error_summary[:200]}")
                     
                 except asyncio.TimeoutError:
