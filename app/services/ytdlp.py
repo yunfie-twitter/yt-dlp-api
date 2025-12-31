@@ -82,8 +82,7 @@ class YTDLPCommandBuilder:
         url: str,
         format_str: str,
         audio_only: bool,
-        audio_format: AudioFormat,
-        include_filesize: bool = True
+        audio_format: AudioFormat
     ) -> List[str]:
         """Build command for streaming download"""
         cmd = [
@@ -96,8 +95,7 @@ class YTDLPCommandBuilder:
             '--retries', str(config.download.retries),
         ]
         
-        if include_filesize:
-            cmd.extend(['--print', 'before_dl:%(filesize_approx)s'])
+        # NOTE: Do NOT use --print here as it mixes with binary output in stdout
         
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
@@ -105,8 +103,9 @@ class YTDLPCommandBuilder:
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
         
-        if config.logging.level != "DEBUG":
-            cmd.append('--no-progress')
+        # Ensure progress is suppressed to keep stdout clean
+        cmd.append('--no-progress')
+        cmd.append('--quiet') # Suppress other outputs
         
         if audio_only and audio_format == AudioFormat.mp3:
             cmd.extend(['-x', '--audio-format', 'mp3'])
