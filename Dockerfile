@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# --user ではなく直接インストール（パスを固定するため）
+# --user ではなく直接インストール(パスを固定するため)
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
@@ -57,5 +57,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 EXPOSE 8000
 
-# /usr/local/bin/uvicorn としてインストールされているため直接起動可能
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# app.main:app として正しいモジュールパスを指定
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
