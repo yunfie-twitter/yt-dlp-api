@@ -1,6 +1,8 @@
 import asyncio
 import os
 import time
+import uuid
+import aiofiles
 from typing import AsyncIterator, Optional
 from collections import deque
 from contextlib import suppress
@@ -23,6 +25,10 @@ import functools
 
 CHUNK_SIZE = 4 * 1024 * 1024
 STDERR_MAX_LINES = 50
+TEMP_DIR = "/tmp/ytdlp_downloads"
+
+# Ensure temp dir exists
+os.makedirs(TEMP_DIR, exist_ok=True)
 
 router = APIRouter()
 
@@ -32,7 +38,8 @@ class DownloadService:
     @staticmethod
     async def download(intent: DownloadIntent, locale: str, request: Request) -> tuple[AsyncIterator[bytes], dict, Optional[int]]:
         """
-        Stream video download with single yt-dlp call.
+        Download to temp file then stream.
+        Reliable for merges/conversions.
         Returns (generator, headers, content_length)
         """
         _ = functools.partial(i18n.get, locale=locale)
@@ -40,12 +47,10 @@ class DownloadService:
         
         # 1. Determine Format String
         format_str = intent.custom_format
-        
         if intent.custom_format and intent.audio_format and not intent.audio_only:
              format_str = f"{intent.custom_format}+{intent.audio_format}"
         elif not format_str and intent.audio_format:
             format_str = intent.audio_format
-            
         if not format_str:
             format_str = FormatDecision.decide(intent)
             
@@ -65,21 +70,25 @@ class DownloadService:
                     filename = f"{root}.{intent.file_format}"
                 log_info(request, f"Filename resolved: {filename}")
             else:
-                log_error(request, f"Filename fetch failed: {result.stderr.decode()[:200]}")
                 raise Exception("Filename retrieval failed")
         except Exception as e:
             log_error(request, f"Filename error: {str(e)}")
             video_id = hash_stable(intent.url)[:8]
-            if intent.file_format:
-                ext = intent.file_format
-            elif intent.audio_only:
-                ext = 'mp3'
-            else:
-                ext = 'mp4'
+            ext = intent.file_format if intent.file_format else ('mp3' if intent.audio_only else 'mp4')
             filename = f"video_{video_id}.{ext}"
             log_info(request, f"Fallback filename: {filename}")
 
-        # 3. Build Stream Command
+        # 3. Prepare Temp File
+        temp_id = str(uuid.uuid4())
+        # We don't know the final extension yt-dlp will produce (it might merge to mkv then remux to mp4)
+        # So we give a template. yt-dlp adds extension automatically if not in template?
+        # Actually, we should specify output template to force a specific path.
+        # But we need to handle extensions.
+        # Safest is to use "%(title)s [%(id)s].%(ext)s" style but mapped to our temp dir?
+        # Or just use a fixed temp name template.
+        temp_path_template = os.path.join(TEMP_DIR, f"{temp_id}.%(ext)s")
+        
+        # 4. Build Download Command (Output to file)
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
@@ -87,7 +96,18 @@ class DownloadService:
             intent.file_format
         )
         
-        log_info(request, f"Starting download process for {safe_url}")
+        # Replace '-o -' with file output
+        # Remove existing '-o' and '-'
+        try:
+            o_index = cmd.index('-o')
+            cmd[o_index+1] = temp_path_template
+        except ValueError:
+            cmd.extend(['-o', temp_path_template])
+
+        # Remove --quiet to debug? Keep it quiet but capture stderr.
+        
+        log_info(request, f"Starting download to temp: {temp_path_template}")
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -95,7 +115,6 @@ class DownloadService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        content_length = None
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
         async def drain_stderr():
@@ -105,8 +124,6 @@ class DownloadService:
                     if not line:
                         break
                     decoded = line.decode().strip()
-                    # Log critical errors or progress if needed (verbose)
-                    # log_info(request, f"yt-dlp stderr: {decoded}")
                     if process.returncode is None or process.returncode != 0:
                         stderr_lines.append(decoded)
             except:
@@ -114,60 +131,74 @@ class DownloadService:
         
         stderr_task = asyncio.create_task(drain_stderr())
         
-        async def generate():
-            start_time = time.time()
-            bytes_transferred = 0
-            try:
-                while True:
-                    chunk = await process.stdout.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    bytes_transferred += len(chunk)
-                    # Log every 10MB approx
-                    if bytes_transferred % (10 * 1024 * 1024) < CHUNK_SIZE:
-                         log_info(request, f"Transferring {safe_url}: {bytes_transferred / 1024 / 1024:.1f} MB")
-                    yield chunk
+        # Wait for completion
+        try:
+            # Increase timeout for full download
+            # TODO: make configurable or adaptive
+            # Currently just waiting indefinitely (or very long)
+            # But process.communicate() reads all.
+            # We already have drain_stderr task.
+            # Just wait for wait()
+            
+            # Use stdout for progress if possible?
+            # Since we removed -o -, stdout might be empty or progress info.
+            # But we passed --no-progress.
+            
+            returncode = await process.wait()
+            
+            if returncode != 0:
+                error_summary = '\n'.join(stderr_lines)
+                raise Exception(f"yt-dlp failed: {error_summary[:200]}")
                 
-                duration = time.time() - start_time
-                log_info(request, f"Download completed: {safe_url} ({bytes_transferred / 1024 / 1024:.1f} MB in {duration:.1f}s)")
-                
-            except asyncio.CancelledError:
-                log_info(request, f"Download cancelled: {safe_url}")
-                process.kill()
-                await process.wait()
-                raise
-            except Exception as e:
-                log_error(request, f"Stream error: {str(e)}")
-                process.kill()
-                await process.wait()
-                raise HTTPException(status_code=500, detail=str(e))
-            finally:
-                try:
-                    returncode = await asyncio.wait_for(process.wait(), timeout=5.0)
-                    if returncode != 0:
-                        error_summary = '\n'.join(stderr_lines)
-                        log_error(request, f"yt-dlp failed with code {returncode}: {error_summary[:200]}")
-                        raise HTTPException(status_code=500, detail=f"Download failed: {error_summary[:200]}")
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
-                
-                stderr_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await stderr_task
+        except Exception as e:
+            log_error(request, f"Process error: {str(e)}")
+            process.kill()
+            await process.wait()
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+             stderr_task.cancel()
+             with suppress(asyncio.CancelledError):
+                await stderr_task
+
+        # 5. Find the generated file
+        # yt-dlp might have added an extension.
+        # We search for files starting with temp_id in TEMP_DIR
+        found_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(temp_id)]
+        if not found_files:
+            raise HTTPException(status_code=500, detail="Output file not found after download")
         
+        final_temp_path = os.path.join(TEMP_DIR, found_files[0])
+        file_size = os.path.getsize(final_temp_path)
+        
+        log_info(request, f"Download finished. Streaming {file_size / 1024 / 1024:.1f} MB")
+
+        # 6. Stream Generator
+        async def generate():
+            try:
+                async with aiofiles.open(final_temp_path, 'rb') as f:
+                    while True:
+                        chunk = await f.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        yield chunk
+            except Exception as e:
+                log_error(request, f"Streaming error: {str(e)}")
+            finally:
+                # Cleanup
+                with suppress(OSError):
+                    os.remove(final_temp_path)
+                log_info(request, f"Cleaned up {final_temp_path}")
+
         encoded_filename = quote(filename)
         headers = {
             'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-cache',
-            'Accept-Ranges': 'none',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(file_size)
         }
         
-        if content_length:
-            headers['Content-Length'] = str(content_length)
-        
-        return generate(), headers, content_length
+        return generate(), headers, file_size
 
 @router.post("/download", dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
 async def download_video(request: Request, video_request: VideoRequest):
@@ -180,17 +211,15 @@ async def download_video(request: Request, video_request: VideoRequest):
     if validation_result == UrlValidationResult.BLOCKED:
         await release_download_slot(request)
         raise HTTPException(status_code=403, detail=_("error.private_ip"))
-    
     if validation_result == UrlValidationResult.INVALID:
         await release_download_slot(request)
         raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
     
     intent = video_request.to_intent()
     safe_url = safe_url_for_log(intent.url)
-    log_info(request, _("log.starting_stream", url=safe_url, format="download"))
+    log_info(request, _("log.starting_stream", url=safe_url, format="download_temp_file"))
     
     try:
-        # Pass request object for logging
         generator, headers, content_length = await DownloadService.download(intent, locale, request)
         
         async def wrapped_generator():
