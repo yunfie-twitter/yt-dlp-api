@@ -32,7 +32,9 @@ class FormatDecision:
                 f"best[ext=mp4][height<={intent.quality}]/best"
             )
         
-        return config.ytdlp.default_format
+        # Default behavior: Merge best video and best audio
+        # If merging is not possible (e.g. progressive stream only), fallback to 'best'
+        return "bestvideo+bestaudio/best"
     
     @staticmethod
     def get_metadata(intent: DownloadIntent) -> MediaMetadata:
