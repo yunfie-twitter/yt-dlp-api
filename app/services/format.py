@@ -8,7 +8,9 @@ class FormatDecision:
     def decide(intent: DownloadIntent) -> str:
         """Decide format string based on intent"""
         if intent.custom_format:
-            return intent.custom_format
+            # Fallback to default if custom format fails
+            # This handles cases where the specified format_id doesn't exist
+            return f"{intent.custom_format}/{config.ytdlp.default_format}"
         
         if intent.audio_only:
             if intent.audio_format == AudioFormat.mp3:
@@ -32,6 +34,12 @@ class FormatDecision:
         format_str = FormatDecision.decide(intent)
         
         if intent.custom_format:
+            # When custom format is used, we can't be sure about the extension
+            # But usually mp4 is a safe default for container if not specified
+            # Ideally we would detect this from format_str, but for now fallback to mp4
+            # If the user specified an audio-only format_id, ext might be wrong here
+            # but yt-dlp will output the correct file extension anyway.
+            # The filename extension in Content-Disposition is a hint.
             return MediaMetadata(
                 format_str=format_str,
                 ext='mp4',
