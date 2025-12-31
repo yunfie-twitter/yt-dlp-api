@@ -6,3 +6,4 @@ pydantic-settings==2.1.0
 rich==13.7.0
 babel==2.14.0
 httpx==0.26.0
+beautifulsoup4
