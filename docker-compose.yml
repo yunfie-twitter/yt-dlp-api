@@ -8,7 +8,7 @@ services:
     container_name: ytdlp-api
     restart: unless-stopped
     environment:
-      - CONFIG_PATH=/app/config.json
+      - CONFIG_PATH=/config/config.json
     ports:
       - "8000:8000"
     depends_on:
@@ -17,7 +17,7 @@ services:
     networks:
       - backend
     volumes:
-      - ./config.json:/app/config.json:ro
+      - ./config:/config
       - deno_cache:/home/appuser/.cache/deno
     deploy:
       resources:
