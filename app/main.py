@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import health, info, download, admin
+from app.api import health, info, download, stream, admin
 from app.config.settings import config
 from app.core.state import state
 from app.infra.redis import init_redis, close_redis
@@ -25,8 +25,8 @@ app.add_middleware(
 app.include_router(health.router, tags=["Health"])
 app.include_router(info.router, tags=["Info"])
 app.include_router(download.router, tags=["Download"])
+app.include_router(stream.router, tags=["Stream"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
-# Stream router will be added later
 
 @app.on_event("startup")
 async def startup_event():
