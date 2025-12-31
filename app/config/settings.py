@@ -1,5 +1,7 @@
+import os
+import json
+import logging
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
 from typing import Optional
 
 class RedisConfig(BaseModel):
@@ -56,4 +58,59 @@ class Config(BaseModel):
     i18n: I18nConfig = Field(default_factory=I18nConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
 
-config = Config()
+    def save_to_file(self, path: str):
+        try:
+            with open(path, 'w') as f:
+                f.write(self.model_dump_json(indent=2))
+        except OSError as e:
+            logging.error(f"Failed to save config to {path}: {e}")
+
+    @classmethod
+    def load_from_file(cls, path: str) -> "Config":
+        if not os.path.exists(path):
+            cfg = cls()
+            logging.info(f"Config file not found at {path}, creating default.")
+            cfg.save_to_file(path)
+            return cfg
+            
+        try:
+            with open(path, 'r') as f:
+                content = f.read()
+                if not content.strip():
+                     logging.warning(f"Config file at {path} is empty, using defaults.")
+                     return cls()
+                data = json.loads(content)
+                # Helper to recursive merge could be added, but for now strict validate
+                # or partial update. Pydantic's model_validate handles dicts.
+                # However, we want to allow partial updates if possible, but 
+                # model_validate usually expects structure. 
+                # Simplest is to load matching fields.
+                
+                # To support partial config files, we might need a deep merge.
+                # For now, let's assume the file should match the structure or we use defaults for missing parts?
+                # Pydantic doesn't do deep merge automatically with model_validate(dict).
+                # But creating a default instance and updating it is safer.
+                
+                default_instance = cls()
+                # Simple deep merge for the top-level sections
+                default_dict = default_instance.model_dump()
+                
+                # Deep merge function
+                def deep_update(target, source):
+                    for k, v in source.items():
+                        if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                            deep_update(target[k], v)
+                        else:
+                            target[k] = v
+                    return target
+
+                deep_update(default_dict, data)
+                return cls.model_validate(default_dict)
+                
+        except (json.JSONDecodeError, OSError) as e:
+            logging.error(f"Error loading config from {path}: {e}. Using defaults.")
+            return cls()
+
+# Load config
+CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/config.json")
+config = Config.load_from_file(CONFIG_PATH)
