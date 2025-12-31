@@ -7,3 +7,4 @@ rich==13.7.0
 babel==2.14.0
 httpx==0.26.0
 beautifulsoup4
+aiofiles==23.2.1
