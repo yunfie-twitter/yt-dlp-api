@@ -56,12 +56,39 @@ class VideoInfoService:
             if is_live and not config.ytdlp.enable_live_streams:
                 raise HTTPException(status_code=400, detail=_("error.live_not_supported"))
             
-            # Efficient top-N selection
+            # Intelligent format selection
             all_formats = info.get("formats", [])
-            formats = heapq.nlargest(
-                20,
-                all_formats,
+            
+            # Helper to check if format is audio-only
+            def is_audio_only(f):
+                return f.get("vcodec") == "none" and f.get("acodec") != "none"
+
+            # Helper to check if format is video
+            def is_video(f):
+                return f.get("vcodec") != "none"
+
+            video_formats = [f for f in all_formats if is_video(f)]
+            audio_formats = [f for f in all_formats if is_audio_only(f)]
+
+            # Select top video formats (prioritize resolution, then filesize)
+            top_videos = heapq.nlargest(
+                15,
+                video_formats,
                 key=lambda f: (f.get("height") or 0, f.get("filesize") or 0)
+            )
+            
+            # Select top audio formats (prioritize filesize/bitrate)
+            top_audios = heapq.nlargest(
+                5,
+                audio_formats,
+                key=lambda f: (f.get("filesize") or 0, f.get("tbr") or 0)
+            )
+            
+            # Combine and sort by generic quality indicator for display
+            selected_formats = sorted(
+                top_videos + top_audios,
+                key=lambda f: (f.get("height") or 0, f.get("filesize") or 0),
+                reverse=True
             )
             
             video_info = VideoInfo(
@@ -78,7 +105,7 @@ class VideoInfoService:
                         "vcodec": f.get("vcodec"),
                         "acodec": f.get("acodec"),
                     }
-                    for f in formats
+                    for f in selected_formats
                 ],
                 thumbnail=info.get("thumbnail"),
                 uploader=info.get("uploader"),
