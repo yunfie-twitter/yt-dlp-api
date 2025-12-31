@@ -3,14 +3,13 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# ビルド用パッケージインストール
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Python依存関係をインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# --user ではなく直接インストール（パスを固定するため）
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
 # --- Final Stage ---
@@ -18,7 +17,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 必要なランタイムパッケージをインストール
+# 必要なランタイムパッケージ
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
@@ -28,42 +27,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # Deno 2.x インストール
-# DENO_INSTALLを/usr/localに設定すると、バイナリは /usr/local/bin/deno に直接配置されます
 ENV DENO_INSTALL=/usr/local
-RUN curl -fsSL https://deno.land/install.sh | sh && \
-    deno --version
+RUN curl -fsSL https://deno.land/install.sh | sh
 
-# yt-dlp最新版をインストール
+# yt-dlpインストール
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
-    yt-dlp --version
+    chmod a+rx /usr/local/bin/yt-dlp
 
-# Denoランタイムを明示的に設定
+# Denoランタイム設定
 ENV YT_DLP_JS_RUNTIME=deno:/usr/local/bin/deno
 
-# Builderステージからpython依存関係をコピー
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# 非rootユーザー作成
+RUN useradd -m -u 1000 appuser
 
-# アプリケーションコードをコピー
-COPY ./app /app
+# Builderステージからライブラリをコピーし、権限をappuserに譲渡する
+# /usr/local にコピーすることで、パスを意識せずに利用可能にします
+COPY --from=builder /install /usr/local
+RUN chown -R appuser:appuser /app
 
-# 非rootユーザー作成とディレクトリ権限の設定
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /home/appuser/.cache/deno && \
-    chown -R appuser:appuser /app /home/appuser/.cache
+# Denoキャッシュディレクトリ
+ENV DENO_DIR=/home/appuser/.cache/deno
+RUN mkdir -p $DENO_DIR && chown -R appuser:appuser /home/appuser/.cache
 
 USER appuser
 
-# Denoのキャッシュディレクトリ環境変数
-ENV DENO_DIR=/home/appuser/.cache/deno
-
-# ヘルスチェック (起動確認)
+# ヘルスチェック
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# ポート公開
 EXPOSE 8000
 
-# Uvicorn起動
+# /usr/local/bin/uvicorn としてインストールされているため直接起動可能
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
