@@ -19,8 +19,18 @@ class VideoRequest(InfoRequest):
     format: Optional[str] = Field(None, description="Custom format specification")
     audio_only: Optional[bool] = Field(False, description="Download audio only")
     audio_format: Optional[AudioFormat] = Field(None, description="Audio format")
-    quality: Optional[int] = Field(None, description="Video quality", ge=144, le=2160)
+    # Remove ge/le constraints to allow 0, validation handled in validator
+    quality: Optional[int] = Field(None, description="Video quality (0 for best/auto)")
     
+    @validator('quality')
+    def validate_quality(cls, v):
+        """Validate quality range, treating 0 as None (auto)"""
+        if v is None or v == 0:
+            return None
+        if v < 144 or v > 2160:
+            raise ValueError("Quality must be between 144 and 2160, or 0 for auto")
+        return v
+
     def model_post_init(self, __context):
         """Set default audio format after initialization"""
         if self.audio_format is None:
