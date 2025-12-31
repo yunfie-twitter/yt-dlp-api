@@ -97,6 +97,29 @@ class YTDLPCommandBuilder:
         return cmd
 
     @staticmethod
+    def build_get_url_command(url: str) -> List[str]:
+        """Build command for fetching direct stream URL (HLS preferred)"""
+        cmd = [
+            'yt-dlp',
+            '--get-url',
+            # Prefer HLS (m3u8) for proxying, fallback to best
+            '-f', 'best[protocol^=m3u8]/best',
+            '--no-playlist',
+            '--socket-timeout', str(config.download.socket_timeout),
+            '--retries', str(config.download.retries),
+        ]
+
+        if not config.ytdlp.enable_live_streams:
+            cmd.extend(['--match-filter', '!is_live'])
+
+        if state.js_runtime:
+            cmd.extend(['--js-runtimes', state.js_runtime])
+
+        cmd.append(url)
+        
+        return cmd
+
+    @staticmethod
     def build_stream_command(
         url: str,
         format_str: str,
