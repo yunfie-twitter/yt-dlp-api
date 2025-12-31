@@ -86,7 +86,15 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         result = await SubprocessExecutor.run(cmd, timeout=30.0)
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail="Failed to get stream URL")
-        m3u8_url = result.stdout.decode().strip().split("\n")[0]
+        
+        # Output might contain multiple URLs (video + audio), take the first one
+        # Ideally we check for m3u8
+        urls = result.stdout.decode().strip().split("\n")
+        m3u8_url = urls[0] if urls else None
+        
+        if not m3u8_url:
+             raise HTTPException(status_code=500, detail="No stream URL found")
+             
     except Exception as e:
         log_error(request, f"Get URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -96,6 +104,20 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         upstream_headers = fingerprint_headers(m3u8_url, request)
         resp = await client.get(m3u8_url, headers=upstream_headers)
         resp.raise_for_status()
+        
+        # Content-Type check: If it's not a playlist, it might be a direct file (mp4/webm)
+        ct = resp.headers.get("content-type", "").lower()
+        if "mpegurl" not in ct and "application/x-mpegurl" not in ct and "vnd.apple.mpegurl" not in ct:
+            # Check content start to be sure (M3U8 must start with #EXTM3U)
+            # Peek first few bytes
+            first_line = resp.content[:7]
+            if first_line != b"#EXTM3U":
+                 # Not a playlist, just redirect or proxy?
+                 # Since this endpoint expects to return a playlist pointing to proxy,
+                 # if we got a direct file, we should probably just return it or redirect.
+                 # Simple redirect is best for direct files.
+                 return Response(status_code=307, headers={"Location": m3u8_url})
+
         content = resp.text
     except Exception as e:
         log_error(request, f"Fetch m3u8 error: {str(e)}")
