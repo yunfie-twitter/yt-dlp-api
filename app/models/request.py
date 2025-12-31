@@ -2,7 +2,7 @@ from pydantic import BaseModel, HttpUrl, Field, validator
 from typing import Optional
 from urllib.parse import urlparse
 from app.config.settings import config
-from models.internal import DownloadIntent, AudioFormat
+from app.models.internal import DownloadIntent, AudioFormat
 
 class VideoRequest(BaseModel):
     url: HttpUrl = Field(..., description="Video URL")
