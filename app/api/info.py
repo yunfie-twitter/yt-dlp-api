@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
-from app.models.request import VideoRequest
+from app.models.request import InfoRequest
 from app.models.response import VideoInfo
 from app.services.info import VideoInfoService
 from app.core.security import SecurityValidator, UrlValidationResult
@@ -12,7 +12,7 @@ import functools
 router = APIRouter()
 
 @router.post("/info", response_model=VideoInfo, dependencies=[Depends(rate_limiter)])
-async def get_video_info(request: Request, video_request: VideoRequest):
+async def get_video_info(request: Request, video_request: InfoRequest):
     """Get video information with caching"""
     
     locale = get_locale(request.headers.get("accept-language"))

@@ -4,7 +4,7 @@ import heapq
 from typing import Optional
 from fastapi import HTTPException
 from app.config.settings import config
-from app.models.request import VideoRequest
+from app.models.request import InfoRequest
 from app.models.response import VideoInfo
 from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
 from app.infra.redis import get_redis
@@ -18,7 +18,7 @@ class VideoInfoService:
     """Video info fetching service"""
     
     @staticmethod
-    async def fetch(video_request: VideoRequest, locale: str) -> VideoInfo:
+    async def fetch(video_request: InfoRequest, locale: str) -> VideoInfo:
         """
         Fetch video information with Redis caching.
         Reduces load from repeated requests for same URL.
