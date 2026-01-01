@@ -50,6 +50,14 @@ BLOCKED_HEADERS = {
 SABR_SEGMENT_DURATION = 5.0  # seconds
 MANIFEST_TTL = 300 # 5 minutes cache for generated manifests
 
+# CORS Headers
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+}
+
 def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0) -> dict:
     parsed = urlparse(target_url)
     referer = f"{parsed.scheme}://{parsed.netloc}/"
@@ -222,7 +230,7 @@ def generate_sabr_playlist(
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
-        f"#EXT-X-TARGETDURATION:{int(SABR_SEGMENT_DURATION)}",
+        f"#EXT-X-TARGETDURATION:{int(SABR_SEGMENT_DURATION) + 1}",
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
     ]
@@ -235,15 +243,19 @@ def generate_sabr_playlist(
     return "\n".join(lines)
 
 
+@router.options("/stream")
+@router.options("/stream/manifest/{manifest_id}")
+@router.options("/stream/segment")
+@router.options("/proxy")
+async def cors_preflight():
+    """Handle CORS preflight requests."""
+    return Response(status_code=200, headers=CORS_HEADERS)
+
+
 @router.get("/stream/manifest/{manifest_id}")
 async def get_cached_manifest(manifest_id: str):
     """Serve cached rewritten manifest."""
-    # Since we are using the general http_cache, we construct a key.
-    # We prefix to avoid collision with real URLs (though uuid is safe enough)
     key = f"manifest:{manifest_id}"
-    
-    # We use a trick: load_cache expects a normalized URL. 
-    # Our key is not a URL but it works as a key in Redis.
     cached = load_cache(key, MANIFEST_TTL)
     
     if not cached:
@@ -251,14 +263,17 @@ async def get_cached_manifest(manifest_id: str):
         
     body, meta = cached
     
+    headers = CORS_HEADERS.copy()
+    headers.update({
+        "Cache-Control": "public, max-age=30",
+        "Content-Disposition": "inline; filename=playlist.m3u8",
+        "Content-Type": "application/vnd.apple.mpegurl",
+    })
+    
     return Response(
         content=body,
         media_type="application/vnd.apple.mpegurl",
-        headers={
-            "Cache-Control": "public, max-age=30",
-            "Content-Disposition": "inline; filename=playlist.m3u8",
-            "Access-Control-Allow-Origin": "*"
-        }
+        headers=headers
     )
 
 
@@ -299,13 +314,33 @@ async def sabr_segment(
         await r.aclose()
         raise HTTPException(status_code=502, detail=f"Upstream error: {r.status_code}")
 
+    # Detect actual content type from upstream
+    content_type = r.headers.get("content-type", "video/mp4")
+    
+    # Don't force mp2t - keep original container format
+    # Most modern HLS players can handle fMP4 segments
+    if "octet-stream" in content_type:
+        # Guess based on URL
+        if ".mp4" in target_url or ".m4s" in target_url:
+            content_type = "video/mp4"
+        elif ".webm" in target_url:
+            content_type = "video/webm"
+        else:
+            content_type = "video/mp2t"  # Default to TS for safety
+
     async def close_upstream():
         await r.aclose()
 
+    headers = CORS_HEADERS.copy()
+    headers["Accept-Ranges"] = "bytes"
+    if "content-length" in r.headers:
+        headers["Content-Length"] = r.headers["content-length"]
+
     return StreamingResponse(
         r.aiter_bytes(),
-        status_code=200, 
-        media_type="video/mp2t",
+        status_code=200,
+        media_type=content_type,
+        headers=headers,
         background=BackgroundTask(close_upstream)
     )
 
@@ -362,7 +397,6 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
     base_url = str(request.base_url).rstrip("/")
     proxy_endpoint = f"{base_url}/proxy"
     
-    # Placeholder for final content
     final_content = b""
 
     # 2. Try to fetch as m3u8
@@ -404,7 +438,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             final_content = (
                 "#EXTM3U\n"
                 "#EXT-X-VERSION:3\n"
-                "#EXT-X-TARGETDURATION:0\n"
+                "#EXT-X-TARGETDURATION:10\n"
                 "#EXTINF:10.0,\n"
                 f"{proxy_url}\n"
                 "#EXT-X-ENDLIST\n"
@@ -417,7 +451,6 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
     manifest_id = str(uuid.uuid4())
     key = f"manifest:{manifest_id}"
     
-    # Save using http_cache utility
     save_cache(
         normalized_url=key,
         body=final_content,
@@ -428,11 +461,17 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
     
     manifest_url = f"{base_url}/stream/manifest/{manifest_id}"
     
-    return JSONResponse({
+    response = JSONResponse({
         "url": manifest_url,
         "original_url": str(video_request.url),
         "method": "sabr" if use_sabr else "hls"
     })
+    
+    # Add CORS headers to JSON response too
+    for key, value in CORS_HEADERS.items():
+        response.headers[key] = value
+    
+    return response
 
 
 @router.get("/proxy")
@@ -461,29 +500,34 @@ async def proxy(request: Request, url: str = Query(...)):
             if rng:
                 start, end = rng
                 partial = body[start : end + 1]
+                
+                headers = CORS_HEADERS.copy()
+                headers.update({
+                    "Cache-Control": f"public, max-age={ttl}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes {start}-{end}/{len(body)}",
+                    "Content-Length": str(len(partial)),
+                })
+                
                 return Response(
                     content=partial,
                     status_code=206,
                     media_type=ct,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": f"public, max-age={ttl}",
-                        "Accept-Ranges": "bytes",
-                        "Content-Range": f"bytes {start}-{end}/{len(body)}",
-                        "Content-Length": str(len(partial)),
-                    },
+                    headers=headers,
                 )
 
+        headers = CORS_HEADERS.copy()
+        headers.update({
+            "Cache-Control": f"public, max-age={ttl}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(body)),
+        })
+        
         return Response(
             content=body,
             status_code=200,
             media_type=ct,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": f"public, max-age={ttl}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(len(body)),
-            },
+            headers=headers,
         )
 
     r = await fetch_with_retry(normalized, request)
@@ -520,26 +564,29 @@ async def proxy(request: Request, url: str = Query(...)):
                 content_type=content_type,
                 ttl=ttl,
             )
+            
+            headers = CORS_HEADERS.copy()
+            headers.update({
+                "Cache-Control": cache_control,
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(body)),
+            })
+            
             return Response(
                 content=body,
                 status_code=200,
                 media_type=content_type or "application/octet-stream",
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": cache_control,
-                    "Accept-Ranges": "bytes",
-                    "Content-Length": str(len(body)),
-                },
+                headers=headers,
             )
 
     except Exception:
         pass
 
-    headers = {
-        "Access-Control-Allow-Origin": "*",
+    headers = CORS_HEADERS.copy()
+    headers.update({
         "Cache-Control": cache_control,
         "Accept-Ranges": "bytes",
-    }
+    })
 
     for k in ("content-range", "content-length"):
         if k in r.headers:
