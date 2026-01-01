@@ -4,8 +4,9 @@ import math
 import httpx
 from urllib.parse import quote, unquote, urljoin, urlparse
 from fastapi import APIRouter, Request, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, JSONResponse
 from starlette.background import BackgroundTask
+import uuid
 
 from app.models.request import InfoRequest
 from app.services.ytdlp import YTDLPCommandBuilder, SubprocessExecutor
@@ -47,6 +48,7 @@ BLOCKED_HEADERS = {
 
 # SABR Settings
 SABR_SEGMENT_DURATION = 5.0  # seconds
+MANIFEST_TTL = 300 # 5 minutes cache for generated manifests
 
 def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0) -> dict:
     parsed = urlparse(target_url)
@@ -207,8 +209,6 @@ def generate_sabr_playlist(
 ) -> str:
     """Generate pseudo-HLS playlist for progressive files."""
     
-    # Calculate approximate segment size (bytes) based on duration
-    # This assumes constant bitrate, which is not always true but good enough for fallback
     if duration <= 0:
         duration = 600 # Fallback 10 min
     
@@ -235,6 +235,33 @@ def generate_sabr_playlist(
     return "\n".join(lines)
 
 
+@router.get("/stream/manifest/{manifest_id}")
+async def get_cached_manifest(manifest_id: str):
+    """Serve cached rewritten manifest."""
+    # Since we are using the general http_cache, we construct a key.
+    # We prefix to avoid collision with real URLs (though uuid is safe enough)
+    key = f"manifest:{manifest_id}"
+    
+    # We use a trick: load_cache expects a normalized URL. 
+    # Our key is not a URL but it works as a key in Redis.
+    cached = load_cache(key, MANIFEST_TTL)
+    
+    if not cached:
+        raise HTTPException(status_code=404, detail="Manifest expired or not found")
+        
+    body, meta = cached
+    
+    return Response(
+        content=body,
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Cache-Control": "public, max-age=30",
+            "Content-Disposition": "inline; filename=playlist.m3u8",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
 @router.get("/stream/segment")
 async def sabr_segment(
     request: Request,
@@ -258,7 +285,6 @@ async def sabr_segment(
 
     range_header = f"bytes={start_byte}-{end_byte}"
     
-    # Reuse fetch_with_retry with Range
     r = await fetch_with_retry(
         target_url, 
         request, 
@@ -278,15 +304,15 @@ async def sabr_segment(
 
     return StreamingResponse(
         r.aiter_bytes(),
-        status_code=200, # HLS segments are usually 200 OK
-        media_type="video/mp2t", # Determine dynamically ideally, but often TS/MP4
+        status_code=200, 
+        media_type="video/mp2t",
         background=BackgroundTask(close_upstream)
     )
 
 
 @router.post("/stream", dependencies=[Depends(rate_limiter)])
 async def get_stream_playlist(request: Request, video_request: InfoRequest):
-    """Get HLS playlist. Tries direct m3u8 first, falls back to SABR."""
+    """Get HLS playlist URL. Returns JSON with url to manifest."""
 
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
@@ -297,44 +323,33 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
     if validation_result == UrlValidationResult.INVALID:
         raise HTTPException(status_code=400, detail=_("error.invalid_url"))
 
-    # 1. Get Info (JSON) to check available formats
-    # We need duration and filesize for SABR
+    # 1. Get Info (JSON)
     cmd = YTDLPCommandBuilder.build_info_command(str(video_request.url))
     try:
-        # We need JSON dump to get duration/filesize
-        # 'build_info_command' uses -j
         result = await SubprocessExecutor.run(cmd, timeout=30.0)
         if result.returncode != 0:
              raise Exception("Info extraction failed")
         
         info = json.loads(result.stdout.decode())
         
-        # Try to find m3u8
         m3u8_url = None
-        # Check 'formats' for m3u8
         formats = info.get('formats', [])
         best_video = None
         
-        # Simple selection: prefer m3u8, else best mp4/webm
         for f in formats:
             if 'm3u8' in f.get('protocol', '') or f.get('ext') == 'm3u8':
                 m3u8_url = f.get('url')
                 break
         
         if not m3u8_url:
-            # If no m3u8 found in formats, maybe manifest_url exists
             m3u8_url = info.get('manifest_url')
 
-        # Fallback candidate (best progressive)
         if not m3u8_url:
-            # Filter for video files with filesize
             candidates = [f for f in formats if f.get('filesize') and f.get('vcodec') != 'none']
             if candidates:
-                # Sort by bitrate/quality
                 best_video = sorted(candidates, key=lambda x: x.get('tbr', 0) or 0, reverse=True)[0]
-                m3u8_url = best_video['url'] # We'll try to treat this as m3u8 first, then fallback
+                m3u8_url = best_video['url']
             else:
-                 # Last resort: 'url' field of info
                  m3u8_url = info.get('url')
 
         if not m3u8_url:
@@ -346,6 +361,9 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
 
     base_url = str(request.base_url).rstrip("/")
     proxy_endpoint = f"{base_url}/proxy"
+    
+    # Placeholder for final content
+    final_content = b""
 
     # 2. Try to fetch as m3u8
     use_sabr = False
@@ -353,56 +371,37 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         r = await fetch_with_retry(m3u8_url, request)
         if not r or r.status_code != 200:
              if r: await r.aclose()
-             use_sabr = True # Fallback if fetch fails
+             use_sabr = True
         else:
             body = await r.aread()
             await r.aclose()
             
-            # Check content type / magic
             ct = r.headers.get("content-type", "").lower()
             if "mpegurl" in ct or body[:7] == b"#EXTM3U":
-                 # It IS a playlist
                  new_content = rewrite_m3u8(body, m3u8_url, proxy_endpoint)
-                 
                  segments = extract_segments(body, m3u8_url, limit=3)
                  if segments:
                      asyncio.create_task(prefetch_segments(segments))
-                     
-                 if b"#EXT-X-ENDLIST" in body:
-                    cache_control = "public, max-age=30"
-                 else:
-                    cache_control = "no-cache"
-
-                 return Response(
-                     content=new_content, 
-                     media_type="application/vnd.apple.mpegurl",
-                     headers={"Cache-Control": cache_control}
-                )
+                 final_content = new_content
             else:
-                # Not a playlist -> SABR Fallback
                 use_sabr = True
-    
     except Exception:
         use_sabr = True
 
-    # 3. SABR Fallback Execution
+    # 3. SABR Fallback
     if use_sabr:
         log_info(request, f"Fallback to SABR for {m3u8_url}")
         
-        # We need metadata for SABR
         duration = info.get('duration', 0)
-        # If we selected a specific format (best_video), use its filesize
         if best_video:
             filesize = best_video.get('filesize') or best_video.get('filesize_approx') or 0
         else:
             filesize = info.get('filesize') or info.get('filesize_approx') or 0
             
         if filesize == 0:
-            # If we can't get filesize, SABR can't calculate ranges properly
-            # As a last last resort, wrap in simple m3u8 (original progressive proxy)
             encoded_url = quote(m3u8_url, safe="")
             proxy_url = f"{proxy_endpoint}?url={encoded_url}"
-            new_content = (
+            final_content = (
                 "#EXTM3U\n"
                 "#EXT-X-VERSION:3\n"
                 "#EXT-X-TARGETDURATION:0\n"
@@ -411,18 +410,29 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
                 "#EXT-X-ENDLIST\n"
             ).encode("utf-8")
         else:
-            # Generate pseudo-HLS
             playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
-            new_content = playlist_str.encode("utf-8")
+            final_content = playlist_str.encode("utf-8")
 
-        return Response(
-             content=new_content, 
-             media_type="application/vnd.apple.mpegurl",
-             headers={"Cache-Control": "public, max-age=60"}
-        )
-
-    # Should not reach here
-    raise HTTPException(status_code=500, detail="Unknown error")
+    # 4. Save to cache and return URL
+    manifest_id = str(uuid.uuid4())
+    key = f"manifest:{manifest_id}"
+    
+    # Save using http_cache utility
+    save_cache(
+        normalized_url=key,
+        body=final_content,
+        status_code=200,
+        content_type="application/vnd.apple.mpegurl",
+        ttl=MANIFEST_TTL
+    )
+    
+    manifest_url = f"{base_url}/stream/manifest/{manifest_id}"
+    
+    return JSONResponse({
+        "url": manifest_url,
+        "original_url": str(video_request.url),
+        "method": "sabr" if use_sabr else "hls"
+    })
 
 
 @router.get("/proxy")
