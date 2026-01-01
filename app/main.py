@@ -41,4 +41,4 @@ async def web_client():
 @app.on_event("startup")
 async def startup_event():
     print(f"Loaded config from {CONFIG_PATH}")
-    print(f"API Key protection: {'Enabled' if config.api_key else 'Disabled'}")
+    # Removed incorrect API Key check to prevent startup error
