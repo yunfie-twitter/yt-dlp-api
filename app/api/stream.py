@@ -1,5 +1,6 @@
 import asyncio
 import random
+import math
 import httpx
 from urllib.parse import quote, unquote, urljoin, urlparse
 from fastapi import APIRouter, Request, Depends, HTTPException, Query
@@ -23,6 +24,7 @@ from app.utils.http_cache import (
     save_cache,
 )
 import functools
+import json
 
 router = APIRouter()
 
@@ -32,7 +34,6 @@ UA = (
     "Chrome/122.0.0.0 Safari/537.36"
 )
 
-# Blocked headers that should never be forwarded
 BLOCKED_HEADERS = {
     "x-forwarded-for",
     "x-real-ip",
@@ -44,15 +45,10 @@ BLOCKED_HEADERS = {
     "forwarded",
 }
 
+# SABR Settings
+SABR_SEGMENT_DURATION = 5.0  # seconds
 
 def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0) -> dict:
-    """Generate headers with progressive fingerprinting stages.
-    
-    Args:
-        target_url: The URL being requested
-        request: FastAPI request (can be None for prefetch)
-        stage: Retry stage (0-3) for progressive fingerprinting
-    """
     parsed = urlparse(target_url)
     referer = f"{parsed.scheme}://{parsed.netloc}/"
 
@@ -65,11 +61,9 @@ def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0
         "Referer": referer,
     }
 
-    # Range transparency (critical for seek)
     if request and "range" in request.headers:
         h["Range"] = request.headers["range"]
 
-    # Progressive fingerprinting stages for 403 retry
     if stage >= 1:
         h["Accept-Language"] = "en-GB,en;q=0.8"
 
@@ -81,13 +75,11 @@ def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0
         })
 
     if stage >= 3:
-        # Force Range header as fallback
         h["Range"] = "bytes=0-"
 
     return h
 
 
-# Reuse client for keep-alive
 client = httpx.AsyncClient(follow_redirects=True, timeout=30.0)
 
 
@@ -100,47 +92,33 @@ async def fetch_with_retry(
     url: str,
     request: Request | None,
     max_retry: int = 4,
+    method: str = "GET",
+    headers: dict | None = None
 ) -> httpx.Response | None:
-    """Fetch URL with progressive retry on 403.
-    
-    Returns:
-        Response object or None if all retries failed
-    """
     last_resp = None
 
     for stage in range(max_retry):
-        headers = fingerprint_headers(url, request, stage=stage)
+        req_headers = fingerprint_headers(url, request, stage=stage)
+        if headers:
+            req_headers.update(headers)
 
         try:
-            req = client.build_request("GET", url, headers=headers)
+            req = client.build_request(method, url, headers=req_headers)
             r = await client.send(req, stream=True)
 
-            # Success or non-403 error - return immediately
             if r.status_code != 403:
                 return r
 
-            # 403 - close and retry with next stage
             await r.aclose()
             last_resp = r
 
         except Exception:
-            # Connection error - stop retrying
             break
 
     return last_resp
 
 
 def extract_segments(m3u8_body: bytes, base_url: str, limit: int = 3) -> list[str]:
-    """Extract segment URLs from m3u8 playlist.
-    
-    Args:
-        m3u8_body: Raw m3u8 content
-        base_url: Base URL for resolving relative paths
-        limit: Maximum number of segments to extract
-    
-    Returns:
-        List of absolute segment URLs
-    """
     try:
         text = m3u8_body.decode("utf-8", errors="ignore")
     except:
@@ -152,7 +130,6 @@ def extract_segments(m3u8_body: bytes, base_url: str, limit: int = 3) -> list[st
         if not stripped or stripped.startswith("#"):
             continue
         
-        # Only prefetch actual segments (.ts, .m4s)
         if not (stripped.endswith(".ts") or stripped.endswith(".m4s")):
             continue
             
@@ -168,14 +145,8 @@ def extract_segments(m3u8_body: bytes, base_url: str, limit: int = 3) -> list[st
 
 
 async def prefetch_segments(urls: list[str]):
-    """Prefetch segments in background for cache warming.
-    
-    Args:
-        urls: List of segment URLs to prefetch
-    """
     for u in urls:
         try:
-            # No Range, cache-friendly request
             req = client.build_request(
                 "GET",
                 u,
@@ -183,7 +154,6 @@ async def prefetch_segments(urls: list[str]):
             )
             r = await client.send(req, stream=True)
 
-            # Only cache small successful responses
             if r.status_code == 200 and "content-length" in r.headers:
                 size_str = r.headers["content-length"]
                 if size_str.isdigit():
@@ -191,7 +161,7 @@ async def prefetch_segments(urls: list[str]):
                     if size < MAX_CACHE_BYTES:
                         body = await r.aread()
                         ttl = cache_ttl_for_url(u)
-                        if ttl > 5:  # Don't cache if TTL too short
+                        if ttl > 5:
                             save_cache(
                                 normalized_url=normalize_url(u),
                                 body=body,
@@ -201,21 +171,10 @@ async def prefetch_segments(urls: list[str]):
                             )
             await r.aclose()
         except Exception:
-            # Prefetch failure is not critical, silently continue
             pass
 
 
 def rewrite_m3u8(body: bytes, base_url: str, proxy_base: str) -> bytes:
-    """Rewrite m3u8 playlist URLs to go through proxy.
-    
-    Args:
-        body: Original m3u8 content
-        base_url: Base URL for resolving relative paths
-        proxy_base: Proxy endpoint base URL
-    
-    Returns:
-        Rewritten m3u8 content
-    """
     try:
         text = body.decode("utf-8", errors="ignore")
     except:
@@ -224,123 +183,246 @@ def rewrite_m3u8(body: bytes, base_url: str, proxy_base: str) -> bytes:
     lines = []
     for line in text.splitlines():
         stripped = line.rstrip("\r\n")
-        
-        # Keep comments and empty lines as-is
         if not stripped or stripped.startswith("#"):
             lines.append(stripped)
             continue
 
-        # Rewrite URLs to proxy
         try:
             abs_url = urljoin(base_url, stripped)
             proxied = f"{proxy_base}?url={quote(abs_url, safe='')}"
             lines.append(proxied)
         except:
-            # Skip malformed URLs
             continue
 
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+# --- SABR Logic ---
+
+def generate_sabr_playlist(
+    url: str,
+    duration: float,
+    filesize: int,
+    base_url: str
+) -> str:
+    """Generate pseudo-HLS playlist for progressive files."""
+    
+    # Calculate approximate segment size (bytes) based on duration
+    # This assumes constant bitrate, which is not always true but good enough for fallback
+    if duration <= 0:
+        duration = 600 # Fallback 10 min
+    
+    total_segments = math.ceil(duration / SABR_SEGMENT_DURATION)
+    avg_bytes_per_sec = filesize / duration
+    bytes_per_segment = int(avg_bytes_per_sec * SABR_SEGMENT_DURATION)
+    
+    encoded_url = quote(url, safe="")
+    segment_base = f"{base_url}/stream/segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
+
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{int(SABR_SEGMENT_DURATION)}",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+    ]
+
+    for i in range(total_segments):
+        lines.append(f"#EXTINF:{SABR_SEGMENT_DURATION:.3f},")
+        lines.append(f"{segment_base}&seq={i}")
+
+    lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines)
+
+
+@router.get("/stream/segment")
+async def sabr_segment(
+    request: Request,
+    url: str = Query(...),
+    seq: int = Query(...),
+    bps: int = Query(...),
+    total: int = Query(...)
+):
+    """Proxy specific byte range as a segment."""
+    target_url = unquote(url)
+    
+    # Calculate Range
+    start_byte = seq * bps
+    end_byte = start_byte + bps - 1
+    
+    if start_byte >= total:
+        raise HTTPException(status_code=404, detail="Segment out of range")
+        
+    if end_byte >= total:
+        end_byte = total - 1
+
+    range_header = f"bytes={start_byte}-{end_byte}"
+    
+    # Reuse fetch_with_retry with Range
+    r = await fetch_with_retry(
+        target_url, 
+        request, 
+        max_retry=3, 
+        headers={"Range": range_header}
+    )
+    
+    if not r:
+        raise HTTPException(status_code=502, detail="Segment fetch failed")
+        
+    if r.status_code not in (200, 206):
+        await r.aclose()
+        raise HTTPException(status_code=502, detail=f"Upstream error: {r.status_code}")
+
+    async def close_upstream():
+        await r.aclose()
+
+    return StreamingResponse(
+        r.aiter_bytes(),
+        status_code=200, # HLS segments are usually 200 OK
+        media_type="video/mp2t", # Determine dynamically ideally, but often TS/MP4
+        background=BackgroundTask(close_upstream)
+    )
+
+
 @router.post("/stream", dependencies=[Depends(rate_limiter)])
 async def get_stream_playlist(request: Request, video_request: InfoRequest):
-    """Get HLS playlist with rewritten proxy URLs."""
+    """Get HLS playlist. Tries direct m3u8 first, falls back to SABR."""
 
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
 
-    # SSRF check on input URL
     validation_result = await SecurityValidator.validate_url(str(video_request.url))
     if validation_result == UrlValidationResult.BLOCKED:
         raise HTTPException(status_code=403, detail=_("error.private_ip"))
     if validation_result == UrlValidationResult.INVALID:
-        raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
+        raise HTTPException(status_code=400, detail=_("error.invalid_url"))
 
-    # Get direct stream URL (m3u8 preferred)
-    cmd = YTDLPCommandBuilder.build_get_url_command(str(video_request.url))
+    # 1. Get Info (JSON) to check available formats
+    # We need duration and filesize for SABR
+    cmd = YTDLPCommandBuilder.build_info_command(str(video_request.url))
     try:
+        # We need JSON dump to get duration/filesize
+        # 'build_info_command' uses -j
         result = await SubprocessExecutor.run(cmd, timeout=30.0)
         if result.returncode != 0:
-            raise HTTPException(status_code=500, detail="Failed to get stream URL")
+             raise Exception("Info extraction failed")
         
-        urls = result.stdout.decode().strip().split("\n")
-        m3u8_url = urls[0] if urls else None
+        info = json.loads(result.stdout.decode())
+        
+        # Try to find m3u8
+        m3u8_url = None
+        # Check 'formats' for m3u8
+        formats = info.get('formats', [])
+        best_video = None
+        
+        # Simple selection: prefer m3u8, else best mp4/webm
+        for f in formats:
+            if 'm3u8' in f.get('protocol', '') or f.get('ext') == 'm3u8':
+                m3u8_url = f.get('url')
+                break
         
         if not m3u8_url:
+            # If no m3u8 found in formats, maybe manifest_url exists
+            m3u8_url = info.get('manifest_url')
+
+        # Fallback candidate (best progressive)
+        if not m3u8_url:
+            # Filter for video files with filesize
+            candidates = [f for f in formats if f.get('filesize') and f.get('vcodec') != 'none']
+            if candidates:
+                # Sort by bitrate/quality
+                best_video = sorted(candidates, key=lambda x: x.get('tbr', 0) or 0, reverse=True)[0]
+                m3u8_url = best_video['url'] # We'll try to treat this as m3u8 first, then fallback
+            else:
+                 # Last resort: 'url' field of info
+                 m3u8_url = info.get('url')
+
+        if not m3u8_url:
              raise HTTPException(status_code=500, detail="No stream URL found")
-             
+
     except Exception as e:
         log_error(request, f"Get URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Proxy endpoint base
     base_url = str(request.base_url).rstrip("/")
     proxy_endpoint = f"{base_url}/proxy"
 
-    # Fetch playlist with retry
-    r = await fetch_with_retry(m3u8_url, request)
-    if not r:
-        raise HTTPException(status_code=502, detail="Failed to fetch upstream playlist")
-    
-    if r.status_code == 403:
-        await r.aclose()
-        raise HTTPException(status_code=403, detail="Upstream forbidden")
-    
-    if r.status_code != 200:
-        await r.aclose()
-        raise HTTPException(status_code=502, detail=f"Upstream error: {r.status_code}")
-
+    # 2. Try to fetch as m3u8
+    use_sabr = False
     try:
-        body = await r.aread()
-        await r.aclose()
-        
-        # Check if it's actually a playlist
-        ct = r.headers.get("content-type", "").lower()
-        is_playlist = "mpegurl" in ct or "application/x-mpegurl" in ct or "vnd.apple.mpegurl" in ct
-        if not is_playlist and body[:7] == b"#EXTM3U":
-            is_playlist = True
+        r = await fetch_with_retry(m3u8_url, request)
+        if not r or r.status_code != 200:
+             if r: await r.aclose()
+             use_sabr = True # Fallback if fetch fails
+        else:
+            body = await r.aread()
+            await r.aclose()
+            
+            # Check content type / magic
+            ct = r.headers.get("content-type", "").lower()
+            if "mpegurl" in ct or body[:7] == b"#EXTM3U":
+                 # It IS a playlist
+                 new_content = rewrite_m3u8(body, m3u8_url, proxy_endpoint)
+                 
+                 segments = extract_segments(body, m3u8_url, limit=3)
+                 if segments:
+                     asyncio.create_task(prefetch_segments(segments))
+                     
+                 if b"#EXT-X-ENDLIST" in body:
+                    cache_control = "public, max-age=30"
+                 else:
+                    cache_control = "no-cache"
 
-        if not is_playlist:
-            # Not a playlist - wrap in simple m3u8
+                 return Response(
+                     content=new_content, 
+                     media_type="application/vnd.apple.mpegurl",
+                     headers={"Cache-Control": cache_control}
+                )
+            else:
+                # Not a playlist -> SABR Fallback
+                use_sabr = True
+    
+    except Exception:
+        use_sabr = True
+
+    # 3. SABR Fallback Execution
+    if use_sabr:
+        log_info(request, f"Fallback to SABR for {m3u8_url}")
+        
+        # We need metadata for SABR
+        duration = info.get('duration', 0)
+        # If we selected a specific format (best_video), use its filesize
+        if best_video:
+            filesize = best_video.get('filesize') or best_video.get('filesize_approx') or 0
+        else:
+            filesize = info.get('filesize') or info.get('filesize_approx') or 0
+            
+        if filesize == 0:
+            # If we can't get filesize, SABR can't calculate ranges properly
+            # As a last last resort, wrap in simple m3u8 (original progressive proxy)
             encoded_url = quote(m3u8_url, safe="")
             proxy_url = f"{proxy_endpoint}?url={encoded_url}"
-            
             new_content = (
                 "#EXTM3U\n"
                 "#EXT-X-VERSION:3\n"
                 "#EXT-X-TARGETDURATION:0\n"
-                "#EXT-X-MEDIA-SEQUENCE:0\n"
                 "#EXTINF:10.0,\n"
                 f"{proxy_url}\n"
                 "#EXT-X-ENDLIST\n"
             ).encode("utf-8")
-            log_info(request, f"Wrapped direct stream in generated m3u8: {m3u8_url}")
         else:
-            # Rewrite playlist URLs
-            new_content = rewrite_m3u8(body, m3u8_url, proxy_endpoint)
-            
-            # Start prefetch in background (non-blocking)
-            segments = extract_segments(body, m3u8_url, limit=3)
-            if segments:
-                asyncio.create_task(prefetch_segments(segments))
+            # Generate pseudo-HLS
+            playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
+            new_content = playlist_str.encode("utf-8")
 
-    except Exception as e:
-        log_error(request, f"Process m3u8 error: {str(e)}")
-        raise HTTPException(status_code=502, detail="Failed to process playlist")
+        return Response(
+             content=new_content, 
+             media_type="application/vnd.apple.mpegurl",
+             headers={"Cache-Control": "public, max-age=60"}
+        )
 
-    # Determine cache policy for m3u8
-    # Live streams should not be cached
-    if b"#EXT-X-ENDLIST" in body:
-        cache_control = "public, max-age=30"
-    else:
-        cache_control = "no-cache"
-
-    headers = {
-        "Cache-Control": cache_control,
-        "Content-Disposition": "inline; filename=playlist.m3u8",
-    }
-
-    return Response(content=new_content, media_type="application/vnd.apple.mpegurl", headers=headers)
+    # Should not reach here
+    raise HTTPException(status_code=500, detail="Unknown error")
 
 
 @router.get("/proxy")
@@ -348,11 +430,8 @@ async def proxy(request: Request, url: str = Query(...)):
     """Proxy m3u8/ts/m4s (Range transparent + file cache)."""
 
     target_url = unquote(url)
-
-    # Normalize URL (cache key stability)
     normalized = normalize_url(target_url)
 
-    # SSRF check on normalized URL
     validation_result = await SecurityValidator.validate_url(normalized)
     if validation_result == UrlValidationResult.BLOCKED:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -360,14 +439,12 @@ async def proxy(request: Request, url: str = Query(...)):
         raise HTTPException(status_code=400, detail="Invalid URL")
 
     ttl = cache_ttl_for_url(normalized)
-
-    # Cache hit?
     cached = load_cache(normalized, ttl)
+    
     if cached is not None:
         body, meta = cached
         ct = meta.content_type or "application/octet-stream"
 
-        # Range support for cached body
         range_header = request.headers.get("range")
         if range_header:
             rng = parse_range_header(range_header, len(body))
@@ -399,7 +476,6 @@ async def proxy(request: Request, url: str = Query(...)):
             },
         )
 
-    # Cache miss: fetch with retry
     r = await fetch_with_retry(normalized, request)
     
     if not r:
@@ -409,14 +485,9 @@ async def proxy(request: Request, url: str = Query(...)):
         await r.aclose()
         raise HTTPException(status_code=403, detail="Upstream forbidden")
 
-    # Decide Cache-Control by extension
     cache_control = f"public, max-age={ttl}"
-
-    # If request was ranged, do not cache, just stream and pass through status.
     has_range = "range" in request.headers
 
-    # Try caching only for small 200 responses without Range
-    # Note: If content-length is missing (chunked encoding), we skip caching and stream
     try:
         status_code = r.status_code
         content_type = r.headers.get("content-type")
@@ -452,24 +523,19 @@ async def proxy(request: Request, url: str = Query(...)):
             )
 
     except Exception:
-        # if cache attempt fails, fall back to streaming
         pass
 
-    # Stream fallback (range transparent)
-    # IMPORTANT: Use BackgroundTask to close response after streaming completes
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Cache-Control": cache_control,
         "Accept-Ranges": "bytes",
     }
 
-    # Pass through upstream range-related headers when present
     for k in ("content-range", "content-length"):
         if k in r.headers:
             headers[k.title()] = r.headers[k]
 
     async def close_upstream():
-        """Background task to close upstream connection after streaming."""
         await r.aclose()
 
     return StreamingResponse(
