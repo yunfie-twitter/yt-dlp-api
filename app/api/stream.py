@@ -225,7 +225,11 @@ def generate_sabr_playlist(
     bytes_per_segment = int(avg_bytes_per_sec * SABR_SEGMENT_DURATION)
     
     encoded_url = quote(url, safe="")
-    segment_base = f"{base_url}/stream/segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
+    # Use relative path for segments to avoid mixed content issues and long URLs
+    # Assuming manifest is served from /stream/manifest/{id}
+    # We need to point to /stream/segment
+    # So relative path is "../../segment"
+    segment_base = f"../../segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
 
     lines = [
         "#EXTM3U",
@@ -293,6 +297,9 @@ async def sabr_segment(
     end_byte = start_byte + bps - 1
     
     if start_byte >= total:
+        # End of stream is not 404 in HLS usually, but for range it is
+        # However, if we are just slightly over, we should clamp or empty
+        # If seq is way off, 404.
         raise HTTPException(status_code=404, detail="Segment out of range")
         
     if end_byte >= total:
@@ -317,16 +324,13 @@ async def sabr_segment(
     # Detect actual content type from upstream
     content_type = r.headers.get("content-type", "video/mp4")
     
-    # Don't force mp2t - keep original container format
-    # Most modern HLS players can handle fMP4 segments
     if "octet-stream" in content_type:
-        # Guess based on URL
         if ".mp4" in target_url or ".m4s" in target_url:
             content_type = "video/mp4"
         elif ".webm" in target_url:
             content_type = "video/webm"
         else:
-            content_type = "video/mp2t"  # Default to TS for safety
+            content_type = "video/mp2t"
 
     async def close_upstream():
         await r.aclose()
@@ -467,7 +471,6 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         "method": "sabr" if use_sabr else "hls"
     })
     
-    # Add CORS headers to JSON response too
     for key, value in CORS_HEADERS.items():
         response.headers[key] = value
     
