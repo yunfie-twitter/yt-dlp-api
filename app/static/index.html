@@ -8,13 +8,7 @@
     <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <style>
-        .video-container {
-            max-width: 100%;
-            margin: 1rem 0;
-        }
         .thumbnail-container {
             position: relative;
             overflow: hidden;
@@ -25,35 +19,71 @@
             height: 100%;
             object-fit: cover;
         }
-        .play-overlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0,0,0,0.3);
-            opacity: 0;
-            transition: opacity 0.3s;
-            cursor: pointer;
-        }
-        .thumbnail-container:hover .play-overlay {
-            opacity: 1;
-        }
         .video-info-card {
             margin-top: 1rem;
         }
         .quality-selector {
             margin: 1rem 0;
         }
+        .white-text {
+            color: white !important;
+        }
+        .center-progress {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        .download-progress-bar {
+            margin: 1rem 0;
+        }
+        .history-item {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .history-item:hover {
+            background: rgba(255,255,255,0.1);
+        }
     </style>
 </head>
 <body class="dark">
     <div id="app">
-        <nav class="primary">
-            <h5 class="max">yt-dlp Web Client</h5>
-            <button class="circle transparent">
-                <i>dark_mode</i>
-            </button>
+        <header>
+            <nav>
+                <button class="circle transparent" @click="toggleDrawer">
+                    <i>menu</i>
+                </button>
+                <h6 class="max">yt-dlp Web Client</h6>
+                <button class="circle transparent">
+                    <i>more_vert</i>
+                </button>
+            </nav>
+        </header>
+
+        <!-- Left Drawer -->
+        <nav class="m l left" :class="{ active: drawerOpen }">
+            <header>
+                <button class="extra circle transparent" @click="toggleDrawer">
+                    <i>menu</i>
+                </button>
+                <button class="extend square round">
+                    <i>widgets</i>
+                    <span>Explore</span>
+                </button>
+            </header>
+            <a @click="showHistoryDialog = true">
+                <i>history</i>
+                <span>ダウンロード履歴</span>
+            </a>
+            <a @click="clearHistory">
+                <i>delete_sweep</i>
+                <span>履歴をクリア</span>
+            </a>
+            <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
+                <i>code</i>
+                <span>GitHub</span>
+            </a>
         </nav>
 
         <main class="responsive">
@@ -68,6 +98,10 @@
                         <label>YouTube, ニコニコ動画, Twitter など</label>
                     </div>
                     <nav class="right-align">
+                        <button @click="pasteFromClipboard" :disabled="loading" class="border">
+                            <i>content_paste</i>
+                            <span>貼り付け</span>
+                        </button>
                         <button @click="fetchInfo" :disabled="loading || !url" class="primary">
                             <i>{{ loading ? 'progress_activity' : 'search' }}</i>
                             <span>{{ loading ? '取得中...' : '解析' }}</span>
@@ -84,13 +118,16 @@
 
             <!-- Result Section -->
             <article v-if="info" class="border video-info-card">
+                <!-- Download Progress -->
+                <div v-if="downloading" class="download-progress-bar padding">
+                    <progress value="50" max="100"></progress>
+                    <p class="center-align">ダウンロード中...</p>
+                </div>
+
                 <div class="grid">
                     <div class="s12 m4">
                         <div class="thumbnail-container">
                             <img :src="info.thumbnail" :alt="info.title">
-                            <div class="play-overlay" @click="playVideo">
-                                <i class="extra">play_circle</i>
-                            </div>
                         </div>
                     </div>
                     <div class="s12 m8">
@@ -122,60 +159,137 @@
 
                             <!-- Action Buttons -->
                             <nav>
-                                <button @click="download" class="responsive green">
+                                <button @click="download" :disabled="downloading" class="responsive green white-text">
                                     <i>download</i>
                                     <span>ダウンロード</span>
-                                </button>
-                                <button @click="playVideo" class="responsive purple">
-                                    <i>play_arrow</i>
-                                    <span>ストリーミング再生</span>
                                 </button>
                             </nav>
                         </div>
                     </div>
-                </div>
-
-                <!-- Video Player -->
-                <div v-show="showPlayer" class="padding video-container">
-                    <video ref="videoPlayer" class="video-js vjs-big-play-centered vjs-theme-city responsive" controls preload="auto"></video>
-                    <article class="small-margin round">
-                        <p class="small">Stream URL: {{ streamUrl }}</p>
-                    </article>
                 </div>
             </article>
 
             <div class="space"></div>
         </main>
 
-        <!-- Progress Indicator -->
-        <div v-if="loading" class="overlay active">
-            <div class="center-align middle-align">
-                <progress class="circle large"></progress>
-            </div>
+        <!-- Loading Indicator (Center) -->
+        <div v-if="loading && !info" class="center-progress">
+            <progress class="circle"></progress>
         </div>
+
+        <!-- History Dialog -->
+        <dialog v-if="showHistoryDialog" class="active">
+            <h5>ダウンロード履歴</h5>
+            <div v-if="history.length === 0">
+                <p>履歴がありません</p>
+            </div>
+            <div v-else>
+                <article v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
+                    <div class="row">
+                        <img :src="item.thumbnail" class="small" style="width: 80px; height: 60px; object-fit: cover; border-radius: 4px;">
+                        <div class="max">
+                            <p class="bold">{{ item.title }}</p>
+                            <p class="small">{{ item.uploader }}</p>
+                            <p class="small">{{ new Date(item.timestamp).toLocaleString('ja-JP') }}</p>
+                        </div>
+                    </div>
+                </article>
+            </div>
+            <nav class="right-align">
+                <button @click="showHistoryDialog = false" class="border">閉じる</button>
+            </nav>
+        </dialog>
     </div>
 
     <script>
-        const { createApp, ref } = Vue
+        const { createApp, ref, onMounted } = Vue
 
         createApp({
             setup() {
                 const url = ref('')
                 const info = ref(null)
                 const loading = ref(false)
+                const downloading = ref(false)
                 const error = ref(null)
                 const selectedQuality = ref('')
-                const showPlayer = ref(false)
-                const videoPlayer = ref(null)
-                const streamUrl = ref('')
-                let player = null
+                const drawerOpen = ref(false)
+                const showHistoryDialog = ref(false)
+                const history = ref([])
+
+                // Cookie utilities
+                const setCookie = (name, value, days = 365) => {
+                    const expires = new Date()
+                    expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
+                    document.cookie = `${name}=${encodeURIComponent(JSON.stringify(value))};expires=${expires.toUTCString()};path=/`
+                }
+
+                const getCookie = (name) => {
+                    const nameEQ = name + '='
+                    const ca = document.cookie.split(';')
+                    for (let i = 0; i < ca.length; i++) {
+                        let c = ca[i]
+                        while (c.charAt(0) === ' ') c = c.substring(1, c.length)
+                        if (c.indexOf(nameEQ) === 0) {
+                            return JSON.parse(decodeURIComponent(c.substring(nameEQ.length, c.length)))
+                        }
+                    }
+                    return null
+                }
+
+                const loadHistory = () => {
+                    const saved = getCookie('downloadHistory')
+                    if (saved) {
+                        history.value = saved
+                    }
+                }
+
+                const saveToHistory = (videoInfo) => {
+                    const historyItem = {
+                        url: url.value,
+                        title: videoInfo.title,
+                        thumbnail: videoInfo.thumbnail,
+                        uploader: videoInfo.uploader,
+                        timestamp: Date.now()
+                    }
+                    history.value.unshift(historyItem)
+                    // Keep only last 20 items
+                    if (history.value.length > 20) {
+                        history.value = history.value.slice(0, 20)
+                    }
+                    setCookie('downloadHistory', history.value)
+                }
+
+                const clearHistory = () => {
+                    if (confirm('履歴をすべて削除しますか？')) {
+                        history.value = []
+                        setCookie('downloadHistory', [])
+                    }
+                }
+
+                const loadFromHistory = (item) => {
+                    url.value = item.url
+                    showHistoryDialog.value = false
+                    fetchInfo()
+                }
+
+                const toggleDrawer = () => {
+                    drawerOpen.value = !drawerOpen.value
+                }
+
+                const pasteFromClipboard = async () => {
+                    try {
+                        const text = await navigator.clipboard.readText()
+                        url.value = text
+                    } catch (e) {
+                        error.value = 'クリップボードからの読み取りに失敗しました'
+                    }
+                }
 
                 const fetchInfo = async () => {
                     if (!url.value) return
                     loading.value = true
                     error.value = null
                     info.value = null
-                    showPlayer.value = false
                     
                     try {
                         const res = await fetch('/info', {
@@ -207,7 +321,9 @@
 
                 const download = async () => {
                     if (!info.value) return
-                    loading.value = true
+                    downloading.value = true
+                    error.value = null
+                    
                     try {
                         const payload = {
                             url: url.value
@@ -235,57 +351,25 @@
                         a.click()
                         window.URL.revokeObjectURL(downloadUrl)
                         document.body.removeChild(a)
+                        
+                        // Save to history
+                        saveToHistory(info.value)
                     } catch (e) {
                         error.value = e.message
                     } finally {
-                        loading.value = false
+                        downloading.value = false
                     }
                 }
 
-                const playVideo = async () => {
-                    if (!info.value) return
-                    showPlayer.value = true
-                    loading.value = true
-                    
-                    try {
-                        const res = await fetch('/stream', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: url.value })
-                        })
-                        if (!res.ok) throw new Error('ストリームの取得に失敗しました')
-                        const data = await res.json()
-                        streamUrl.value = data.url
-                        
-                        if (player) player.dispose()
-                        
-                        setTimeout(() => {
-                            player = videojs(videoPlayer.value, {
-                                fluid: true,
-                                html5: {
-                                    hls: {
-                                        overrideNative: true
-                                    }
-                                }
-                            })
-                            player.src({
-                                src: streamUrl.value,
-                                type: 'application/x-mpegURL'
-                            })
-                            player.play()
-                        }, 100)
-
-                    } catch (e) {
-                        error.value = e.message
-                    } finally {
-                        loading.value = false
-                    }
-                }
+                onMounted(() => {
+                    loadHistory()
+                })
 
                 return {
-                    url, info, loading, error, selectedQuality,
-                    fetchInfo, formatDuration, download, playVideo,
-                    showPlayer, videoPlayer, streamUrl
+                    url, info, loading, downloading, error, selectedQuality,
+                    drawerOpen, showHistoryDialog, history,
+                    fetchInfo, formatDuration, download, toggleDrawer,
+                    pasteFromClipboard, clearHistory, loadFromHistory, saveToHistory
                 }
             }
         }).mount('#app')
