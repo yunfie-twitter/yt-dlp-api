@@ -49,6 +49,11 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
             transform: translateY(-1px);
         }
+
+        .rail-nav a:active {
+            transform: scale(0.97);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        }
         
         .rail-nav a.active {
             background: var(--secondary-container);
@@ -87,6 +92,10 @@
             transform: scale(1.02);
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
+
+        header button:active {
+            transform: scale(0.98);
+        }
         
         main {
             flex: 1;
@@ -100,6 +109,8 @@
         }
 
         button {
+            position: relative;
+            overflow: hidden;
             transition: background 150ms cubic-bezier(0.4, 0, 0.2, 1),
                         transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
                         box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -112,12 +123,34 @@
         }
 
         button:active:not(:disabled) {
-            transform: translateY(0);
+            transform: scale(0.98) translateY(0);
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
         button:disabled {
             opacity: 0.6;
+        }
+
+        /* Ripple effect */
+        @keyframes ripple {
+            from {
+                transform: scale(0);
+                opacity: 0.5;
+            }
+            to {
+                transform: scale(4);
+                opacity: 0;
+            }
+        }
+
+        .ripple {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.4);
+            width: 20px;
+            height: 20px;
+            animation: ripple 600ms cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
         }
 
         input, select {
@@ -215,7 +248,7 @@
         }
 
         .bottom-nav a:active {
-            transform: scale(0.98);
+            transform: scale(0.97);
         }
         
         .bottom-nav a.active {
@@ -266,6 +299,21 @@
         .thumbnail-container:hover img {
             transform: scale(1.02);
         }
+
+        .thumbnail-overlay {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            padding: 0.25rem 0.5rem;
+            margin: 0.5rem;
+            background: rgba(0, 0, 0, 0.75);
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            backdrop-filter: blur(4px);
+        }
+
         .video-info-card {
             margin-top: 1rem;
             animation: fadeIn 350ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -302,7 +350,7 @@
             transform: translateY(-1px);
         }
         .history-item:active {
-            transform: translateY(0);
+            transform: scale(0.99) translateY(0);
         }
         .history-thumbnail {
             width: 120px;
@@ -324,6 +372,7 @@
             align-items: center;
             justify-content: center;
             animation: fadeInOverlay 250ms cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(2px);
         }
         .modal-overlay.active {
             display: flex;
@@ -347,6 +396,7 @@
             max-height: 90vh;
             overflow-y: auto;
             display: none;
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12), 0 0 2px rgba(0, 0, 0, 0.08);
         }
         
         dialog.active {
@@ -364,6 +414,30 @@
                 opacity: 1;
                 transform: translate(-50%, -50%);
             }
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 150ms cubic-bezier(0.4, 0, 0.2, 1),
+                        transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .modal-close:hover {
+            background: var(--surface-variant);
+            transform: scale(1.05);
+        }
+
+        .modal-close:active {
+            transform: scale(0.95);
         }
 
         .settings-item {
@@ -485,11 +559,11 @@
                                 <label>YouTube, ニコニコ動画, Twitter など</label>
                             </div>
                             <nav class="right-align">
-                                <button @click="pasteFromClipboard" :disabled="loading" class="primary">
+                                <button @click="addRipple($event); pasteFromClipboard()" :disabled="loading" class="primary">
                                     <i>content_paste</i>
                                     <span>貼り付け</span>
                                 </button>
-                                <button @click="fetchInfo" :disabled="loading || !url" class="primary">
+                                <button @click="addRipple($event); fetchInfo()" :disabled="loading || !url" class="primary">
                                     <i>search</i>
                                     <span>解析</span>
                                     <progress v-if="loading" class="circle small download-progress"></progress>
@@ -509,6 +583,12 @@
                             <div class="s12 m4">
                                 <div class="thumbnail-container">
                                     <img :src="info.thumbnail" :alt="info.title">
+                                    <div class="thumbnail-overlay" v-if="info.duration">
+                                        {{ formatDuration(info.duration) }}
+                                    </div>
+                                    <div class="thumbnail-overlay" v-else>
+                                        LIVE
+                                    </div>
                                 </div>
                             </div>
                             <div class="s12 m8">
@@ -519,9 +599,6 @@
                                         <span>{{ info.uploader || 'Unknown' }}</span>
                                     </p>
                                     <div class="row small-margin">
-                                        <i>schedule</i>
-                                        <span>{{ formatDuration(info.duration) }}</span>
-                                        <span class="small-margin"> • </span>
                                         <i>visibility</i>
                                         <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
                                     </div>
@@ -538,7 +615,7 @@
                                     </div>
 
                                     <nav>
-                                        <button @click="download" :disabled="downloading" class="responsive primary">
+                                        <button @click="addRipple($event); download()" :disabled="downloading" class="responsive primary">
                                             <i>download</i>
                                             <span>ダウンロード</span>
                                             <progress v-if="downloading" class="circle small download-progress"></progress>
@@ -555,7 +632,7 @@
                         <div class="padding">
                             <div class="row">
                                 <h5 class="max">ダウンロード履歴</h5>
-                                <button @click="confirmClearHistory" class="primary" :disabled="history.length === 0">
+                                <button @click="addRipple($event); confirmClearHistory()" class="primary" :disabled="history.length === 0">
                                     <i>delete_sweep</i>
                                     <span>クリア</span>
                                 </button>
@@ -568,7 +645,7 @@
                             <div class="padding">
                                 <i class="extra">history</i>
                                 <p>履歴がありません</p>
-                                <button @click="navigateToPage('home')" class="primary">
+                                <button @click="addRipple($event); navigateToPage('home')" class="primary">
                                     <i>home</i>
                                     <span>ホームに戻る</span>
                                 </button>
@@ -658,16 +735,22 @@
 
         <!-- Delete Confirmation Dialog -->
         <dialog :class="{ active: showDeleteModal }">
+            <button class="modal-close circle transparent" @click="showDeleteModal = false">
+                <i>close</i>
+            </button>
             <h5>履歴を削除</h5>
             <p>すべてのダウンロード履歴を削除しますか?</p>
             <nav class="right-align">
-                <button @click="showDeleteModal = false" class="border">キャンセル</button>
-                <button @click="clearHistory" class="primary">削除</button>
+                <button @click="addRipple($event); showDeleteModal = false" class="border">キャンセル</button>
+                <button @click="addRipple($event); clearHistory()" class="primary">削除</button>
             </nav>
         </dialog>
 
         <!-- Settings Dialog -->
         <dialog :class="{ active: showSettingsModal }" style="min-width: 400px; max-width: 500px;">
+            <button class="modal-close circle transparent" @click="showSettingsModal = false">
+                <i>close</i>
+            </button>
             <h5 style="margin-bottom: 1.5rem;">設定</h5>
             
             <div class="settings-item">
@@ -701,8 +784,15 @@
                 </p>
             </div>
 
+            <div class="settings-item">
+                <p class="small" style="opacity: 0.5; font-style: italic;">
+                    <i>update</i>
+                    <span>今後のアップデートで項目が追加されます</span>
+                </p>
+            </div>
+
             <nav class="right-align" style="margin-top: 1rem;">
-                <button @click="showSettingsModal = false" class="primary">閉じる</button>
+                <button @click="addRipple($event); showSettingsModal = false" class="primary">閉じる</button>
             </nav>
         </dialog>
     </div>
@@ -726,6 +816,26 @@
                 const downloadProgress = ref(null)
                 const websocket = ref(null)
                 const currentTaskId = ref(null)
+
+                const addRipple = (event) => {
+                    const button = event.currentTarget
+                    const ripple = document.createElement('span')
+                    const rect = button.getBoundingClientRect()
+                    const size = Math.max(rect.width, rect.height)
+                    const x = event.clientX - rect.left - size / 2
+                    const y = event.clientY - rect.top - size / 2
+
+                    ripple.style.width = ripple.style.height = size + 'px'
+                    ripple.style.left = x + 'px'
+                    ripple.style.top = y + 'px'
+                    ripple.classList.add('ripple')
+
+                    button.appendChild(ripple)
+
+                    setTimeout(() => {
+                        ripple.remove()
+                    }, 600)
+                }
 
                 const setCookie = (name, value, days = 365) => {
                     const expires = new Date()
@@ -966,7 +1076,7 @@
                     currentPage, showDeleteModal, showSettingsModal, history, isDarkMode, downloadProgress,
                     fetchInfo, formatDuration, download, navigateToPage,
                     pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, 
-                    toggleTheme, toggleThemeManual
+                    toggleTheme, toggleThemeManual, addRipple
                 }
             }
         }).mount('#app')
