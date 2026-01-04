@@ -225,11 +225,8 @@ def generate_sabr_playlist(
     bytes_per_segment = int(avg_bytes_per_sec * SABR_SEGMENT_DURATION)
     
     encoded_url = quote(url, safe="")
-    # Use relative path for segments to avoid mixed content issues and long URLs
-    # Assuming manifest is served from /stream/manifest/{id}
-    # We need to point to /stream/segment
-    # So relative path is "../../segment"
-    segment_base = f"../../segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
+    # Fixed: Use absolute path /stream/segment instead of relative path
+    segment_base = f"{base_url}/stream/segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
 
     lines = [
         "#EXTM3U",
