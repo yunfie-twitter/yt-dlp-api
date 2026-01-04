@@ -99,7 +99,6 @@ dialog {
 
 <header>
 <nav>
-<button class="circle transparent" data-ui="#drawer-left">
 <i>menu</i>
 </button>
 <h6 class="max app-title">yt-dlp Web Client</h6>
@@ -107,14 +106,28 @@ dialog {
 </header>
 
 <nav id="drawer-left" class="left">
-<header>
-<img src="https://www.beercss.com/favicon.png" class="circle">
-<h6>yt-dlp Web</h6>
-</header>
+  
+  <!-- メニュー開閉ボタン -->
+<a @click="toggleDrawer">
+  <i>{{ drawerOpen ? 'close' : 'menu' }}</i>
+  <span>{{ drawerOpen ? '閉じる' : 'メニュー' }}</span>
+</a>
 
-<a @click="navigate('home')"><i>home</i><span>ホーム</span></a>
-<a @click="navigate('history')"><i>history</i><span>履歴</span></a>
+
+  <div class="divider"></div>
+
+  <a @click="navigate('home')">
+    <i>home</i>
+    <span>ホーム</span>
+  </a>
+
+  <a @click="navigate('history')">
+    <i>history</i>
+    <span>履歴</span>
+  </a>
+
 </nav>
+
 
 <main class="responsive">
 
@@ -239,6 +252,25 @@ if(!s) return 'LIVE'
 const m=Math.floor(s/60)
 const sec=s%60
 return `${m}:${sec.toString().padStart(2,'0')}`
+}
+const drawerOpen = ref(false)
+
+const toggleDrawer = () => {
+  const drawer = document.querySelector('#drawer-left')
+  drawerOpen.value = !drawerOpen.value
+
+  drawer.classList.toggle('active', drawerOpen.value)
+}
+
+const closeDrawer = () => {
+  const drawer = document.querySelector('#drawer-left')
+  drawerOpen.value = false
+  drawer.classList.remove('active')
+}
+
+const navigate = (page) => {
+  currentPage.value = page
+  closeDrawer()
 }
 
 return{url,info,loading,downloading,quality,page,history,navigate,fetchInfo,download,formatDuration}
