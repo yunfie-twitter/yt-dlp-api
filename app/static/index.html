@@ -148,7 +148,7 @@
         }
 
         footer nav {
-            padding: 0.75rem 1rem;
+            padding: 0.5rem 1rem;
         }
 
         footer .progress-info {
@@ -347,19 +347,20 @@
             max-height: 90vh;
             overflow-y: auto;
             display: none;
-            animation: modalSlideIn 280ms cubic-bezier(0.4, 0, 0.2, 1);
         }
+        
         dialog.active {
             display: block;
             z-index: 1000;
+            animation: modalSlideIn 280ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
 
         @keyframes modalSlideIn {
-            from {
+            0% {
                 opacity: 0;
-                transform: translate(-50%, calc(-50% + 8px));
+                transform: translate(-50%, calc(-50% - 8px));
             }
-            to {
+            100% {
                 opacity: 1;
                 transform: translate(-50%, -50%);
             }
