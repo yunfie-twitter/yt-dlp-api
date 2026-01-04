@@ -198,10 +198,12 @@
         dialog.active {
             z-index: 1000;
         }
-        .menu-divider {
-            height: 1px;
-            background: var(--outline-variant);
-            margin: 0.5rem 0;
+        .settings-item {
+            padding: 1rem;
+            border-bottom: 1px solid var(--outline-variant);
+        }
+        .settings-item:last-child {
+            border-bottom: none;
         }
     </style>
 </head>
@@ -231,29 +233,9 @@
             <header>
                 <nav>
                     <h6 class="max">yt-dlp Web Client</h6>
-                    <button class="circle transparent" data-ui="#settings-menu">
+                    <button class="circle transparent" @click="showSettingsModal = true">
                         <i>settings</i>
                     </button>
-                    <menu id="settings-menu">
-                        <ul class="list border">
-                            <li @click="toggleThemeManual">
-                                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                                <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
-                            </li>
-                            <div class="menu-divider"></div>
-                            <li>
-                                <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: inherit; text-decoration: none; display: flex; align-items: center;">
-                                    <i>code</i>
-                                    <span>GitHub リポジトリ</span>
-                                </a>
-                            </li>
-                            <div class="menu-divider"></div>
-                            <li>
-                                <i>info</i>
-                                <span>バージョン 2.0.0</span>
-                            </li>
-                        </ul>
-                    </menu>
                 </nav>
             </header>
 
@@ -432,14 +414,57 @@
             </nav>
         </div>
 
+        <!-- Modal Overlays -->
         <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
+        <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
 
+        <!-- Delete Confirmation Dialog -->
         <dialog :class="{ active: showDeleteModal }">
             <h5>履歴を削除</h5>
             <p>すべてのダウンロード履歴を削除しますか?</p>
             <nav class="right-align">
                 <button @click="showDeleteModal = false" class="border">キャンセル</button>
                 <button @click="clearHistory" class="primary">削除</button>
+            </nav>
+        </dialog>
+
+        <!-- Settings Dialog -->
+        <dialog :class="{ active: showSettingsModal }">
+            <h5>設定</h5>
+            
+            <div class="settings-item">
+                <div class="row">
+                    <div class="max">
+                        <h6>外観</h6>
+                        <p class="small">テーマを変更</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" :checked="isDarkMode" @change="toggleTheme">
+                        <span></span>
+                    </label>
+                </div>
+                <p class="small">
+                    <i>{{ isDarkMode ? 'dark_mode' : 'light_mode' }}</i>
+                    <span>{{ isDarkMode ? 'ダークモード' : 'ライトモード' }}</span>
+                </p>
+            </div>
+
+            <div class="settings-item">
+                <h6>情報</h6>
+                <p class="small">
+                    <i>info</i>
+                    <span>バージョン 2.0.0</span>
+                </p>
+                <p class="small">
+                    <i>code</i>
+                    <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: var(--primary); text-decoration: none;">
+                        GitHub リポジトリ
+                    </a>
+                </p>
+            </div>
+
+            <nav class="right-align">
+                <button @click="showSettingsModal = false" class="primary">閉じる</button>
             </nav>
         </dialog>
     </div>
@@ -457,6 +482,7 @@
                 const selectedQuality = ref('')
                 const currentPage = ref('home')
                 const showDeleteModal = ref(false)
+                const showSettingsModal = ref(false)
                 const history = ref([])
                 const isDarkMode = ref(true)
                 const downloadProgress = ref(null)
@@ -524,6 +550,17 @@
                     currentPage.value = page
                 }
 
+                const toggleTheme = (event) => {
+                    isDarkMode.value = event.target.checked
+                    if (isDarkMode.value) {
+                        document.body.classList.add('dark')
+                        document.body.classList.remove('light')
+                    } else {
+                        document.body.classList.add('light')
+                        document.body.classList.remove('dark')
+                    }
+                }
+
                 const toggleThemeManual = () => {
                     isDarkMode.value = !isDarkMode.value
                     if (isDarkMode.value) {
@@ -586,7 +623,6 @@
                     
                     websocket.value.onopen = () => {
                         console.log('WebSocket connected')
-                        // Send ping every 30 seconds to keep connection alive
                         const pingInterval = setInterval(() => {
                             if (websocket.value?.readyState === WebSocket.OPEN) {
                                 websocket.value.send('ping')
@@ -601,7 +637,6 @@
                             const data = JSON.parse(event.data)
                             downloadProgress.value = data
                             
-                            // When download completes, trigger browser download
                             if (data.status === 'completed') {
                                 setTimeout(() => {
                                     triggerBrowserDownload(taskId)
@@ -622,21 +657,18 @@
                 }
 
                 const triggerBrowserDownload = (taskId) => {
-                    // Create a hidden link and trigger browser's native download
                     const a = document.createElement('a')
                     a.href = `/download/file/${taskId}`
                     a.style.display = 'none'
                     document.body.appendChild(a)
                     a.click()
                     
-                    // Clean up
                     setTimeout(() => {
                         document.body.removeChild(a)
                         downloadProgress.value = null
                         downloading.value = false
                         currentTaskId.value = null
                         
-                        // Save to history
                         if (info.value) {
                             saveToHistory(info.value)
                         }
@@ -661,7 +693,6 @@
                             payload.quality = parseInt(selectedQuality.value)
                         }
                         
-                        // Start download task
                         const res = await fetch('/download/start', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -673,7 +704,6 @@
                         const data = await res.json()
                         currentTaskId.value = data.task_id
                         
-                        // Connect WebSocket for progress updates
                         connectWebSocket(data.task_id)
                         
                     } catch (e) {
@@ -684,7 +714,6 @@
                 }
 
                 onUnmounted(() => {
-                    // Close WebSocket on component unmount
                     if (websocket.value) {
                         websocket.value.close()
                     }
@@ -696,9 +725,10 @@
 
                 return {
                     url, info, loading, downloading, error, selectedQuality,
-                    currentPage, showDeleteModal, history, isDarkMode, downloadProgress,
+                    currentPage, showDeleteModal, showSettingsModal, history, isDarkMode, downloadProgress,
                     fetchInfo, formatDuration, download, navigateToPage,
-                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, toggleThemeManual
+                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, 
+                    toggleTheme, toggleThemeManual
                 }
             }
         }).mount('#app')
