@@ -242,7 +242,7 @@ def generate_sabr_playlist(
         lines.append(f"{segment_base}&seq={i}")
 
     lines.append("#EXT-X-ENDLIST")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"  # Add trailing newline
 
 
 @router.options("/stream")
@@ -269,12 +269,12 @@ async def get_cached_manifest(manifest_id: str):
     headers.update({
         "Cache-Control": "public, max-age=30",
         "Content-Disposition": "inline; filename=playlist.m3u8",
-        "Content-Type": "application/vnd.apple.mpegurl",
     })
     
     return Response(
         content=body,
-        media_type="application/vnd.apple.mpegurl",
+        status_code=200,
+        media_type="application/x-mpegurl",  # Better VLC compatibility
         headers=headers
     )
 
@@ -457,6 +457,10 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         else:
             playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
             final_content = playlist_str.encode("utf-8")
+            
+            # Debug log the generated manifest
+            log_info(request, f"Generated SABR manifest ({len(final_content)} bytes):")
+            log_info(request, final_content.decode('utf-8')[:500])  # First 500 chars
 
     # 4. Save to cache and return URL
     manifest_id = str(uuid.uuid4())
@@ -466,7 +470,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         normalized_url=key,
         body=final_content,
         status_code=200,
-        content_type="application/vnd.apple.mpegurl",
+        content_type="application/x-mpegurl",
         ttl=MANIFEST_TTL
     )
     
