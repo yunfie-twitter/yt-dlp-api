@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -32,6 +33,12 @@ app.include_router(admin.router, tags=["Admin"])
 # 4. Static Files & Web Client
 os.makedirs("app/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# 5. Mount web clients directory
+web_clients_path = Path("web/clients")
+if web_clients_path.exists():
+    app.mount("/web/clients", StaticFiles(directory="web/clients", html=True), name="web_clients")
+    print(f"Mounted /web/clients from {web_clients_path.absolute()}")
 
 @app.get("/web", tags=["Web Client"])
 async def web_client():
