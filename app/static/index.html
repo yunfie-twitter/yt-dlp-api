@@ -154,6 +154,22 @@
             display: inline-block;
             margin-left: 0.5rem;
         }
+        .progress-card {
+            margin-top: 1rem;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--surface-variant);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
         .history-item {
             cursor: pointer;
             transition: background 0.2s;
@@ -316,6 +332,34 @@
                             </div>
                         </div>
                     </article>
+
+                    <!-- Progress Card -->
+                    <article v-if="downloadProgress" class="border progress-card">
+                        <div class="padding">
+                            <div class="row">
+                                <div class="max">
+                                    <h6>ダウンロード中</h6>
+                                    <p class="small">{{ downloadProgress.filename || '処理中...' }}</p>
+                                </div>
+                                <i v-if="downloadProgress.status === 'completed'" class="green-text">check_circle</i>
+                                <progress v-else-if="downloadProgress.status === 'downloading'" class="circle"></progress>
+                            </div>
+                            
+                            <div class="progress-bar">
+                                <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                            </div>
+                            
+                            <div class="row small">
+                                <span class="max">{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
+                                <span v-if="downloadProgress.speed">{{ downloadProgress.speed }}</span>
+                                <span v-if="downloadProgress.eta" class="small-margin">ETA {{ downloadProgress.eta }}</span>
+                            </div>
+                            
+                            <p v-if="downloadProgress.message" class="small center-align">
+                                {{ downloadProgress.message }}
+                            </p>
+                        </div>
+                    </article>
                 </div>
 
                 <div v-if="currentPage === 'history'">
@@ -401,7 +445,7 @@
     </div>
 
     <script>
-        const { createApp, ref, onMounted } = Vue
+        const { createApp, ref, onMounted, onUnmounted } = Vue
 
         createApp({
             setup() {
@@ -415,6 +459,9 @@
                 const showDeleteModal = ref(false)
                 const history = ref([])
                 const isDarkMode = ref(true)
+                const downloadProgress = ref(null)
+                const websocket = ref(null)
+                const currentTaskId = ref(null)
 
                 const setCookie = (name, value, days = 365) => {
                     const expires = new Date()
@@ -531,10 +578,80 @@
                         : `${m}:${s.toString().padStart(2, '0')}`
                 }
 
+                const connectWebSocket = (taskId) => {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+                    const wsUrl = `${protocol}//${window.location.host}/download/progress/ws/${taskId}`
+                    
+                    websocket.value = new WebSocket(wsUrl)
+                    
+                    websocket.value.onopen = () => {
+                        console.log('WebSocket connected')
+                        // Send ping every 30 seconds to keep connection alive
+                        const pingInterval = setInterval(() => {
+                            if (websocket.value?.readyState === WebSocket.OPEN) {
+                                websocket.value.send('ping')
+                            } else {
+                                clearInterval(pingInterval)
+                            }
+                        }, 30000)
+                    }
+                    
+                    websocket.value.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data)
+                            downloadProgress.value = data
+                            
+                            // When download completes, trigger browser download
+                            if (data.status === 'completed') {
+                                setTimeout(() => {
+                                    triggerBrowserDownload(taskId)
+                                }, 500)
+                            }
+                        } catch (e) {
+                            console.error('WebSocket message parse error:', e)
+                        }
+                    }
+                    
+                    websocket.value.onerror = (error) => {
+                        console.error('WebSocket error:', error)
+                    }
+                    
+                    websocket.value.onclose = () => {
+                        console.log('WebSocket disconnected')
+                    }
+                }
+
+                const triggerBrowserDownload = (taskId) => {
+                    // Create a hidden link and trigger browser's native download
+                    const a = document.createElement('a')
+                    a.href = `/download/file/${taskId}`
+                    a.style.display = 'none'
+                    document.body.appendChild(a)
+                    a.click()
+                    
+                    // Clean up
+                    setTimeout(() => {
+                        document.body.removeChild(a)
+                        downloadProgress.value = null
+                        downloading.value = false
+                        currentTaskId.value = null
+                        
+                        // Save to history
+                        if (info.value) {
+                            saveToHistory(info.value)
+                        }
+                    }, 1000)
+                }
+
                 const download = async () => {
                     if (!info.value) return
                     downloading.value = true
                     error.value = null
+                    downloadProgress.value = {
+                        status: 'queued',
+                        progress: 0,
+                        message: 'ダウンロードを開始しています...'
+                    }
                     
                     try {
                         const payload = { url: url.value }
@@ -544,31 +661,34 @@
                             payload.quality = parseInt(selectedQuality.value)
                         }
                         
-                        const res = await fetch('/download', {
+                        // Start download task
+                        const res = await fetch('/download/start', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         })
                         
-                        if (!res.ok) throw new Error('ダウンロードに失敗しました')
+                        if (!res.ok) throw new Error('ダウンロードの開始に失敗しました')
                         
-                        const blob = await res.blob()
-                        const downloadUrl = window.URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = downloadUrl
-                        a.download = `${info.value.title || 'video'}.${selectedQuality.value === 'audio' ? 'mp3' : 'mp4'}`
-                        document.body.appendChild(a)
-                        a.click()
-                        window.URL.revokeObjectURL(downloadUrl)
-                        document.body.removeChild(a)
+                        const data = await res.json()
+                        currentTaskId.value = data.task_id
                         
-                        saveToHistory(info.value)
+                        // Connect WebSocket for progress updates
+                        connectWebSocket(data.task_id)
+                        
                     } catch (e) {
                         error.value = e.message
-                    } finally {
                         downloading.value = false
+                        downloadProgress.value = null
                     }
                 }
+
+                onUnmounted(() => {
+                    // Close WebSocket on component unmount
+                    if (websocket.value) {
+                        websocket.value.close()
+                    }
+                })
 
                 onMounted(() => {
                     loadHistory()
@@ -576,7 +696,7 @@
 
                 return {
                     url, info, loading, downloading, error, selectedQuality,
-                    currentPage, showDeleteModal, history, isDarkMode,
+                    currentPage, showDeleteModal, history, isDarkMode, downloadProgress,
                     fetchInfo, formatDuration, download, navigateToPage,
                     pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, toggleThemeManual
                 }
