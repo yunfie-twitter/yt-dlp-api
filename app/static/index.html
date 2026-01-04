@@ -724,9 +724,9 @@
                         </div>
                         <div class="progress-stats">
                             <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
-                            <span v-if="downloadProgress.speed">• {{ downloadProgress.speed }}</span>
-                            <span v-if="downloadProgress.eta">• ETA {{ downloadProgress.eta }}</span>
-                            <span v-if="downloadProgress.message">• {{ downloadProgress.message }}</span>
+                            <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
+                            <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
+                            <span v-if="downloadProgress.message">・ {{ downloadProgress.message }}</span>
                         </div>
                     </div>
                     
@@ -1024,6 +1024,11 @@
                     }
                     
                     websocket.value.onmessage = (event) => {
+                        // Ignore pong messages from server
+                        if (event.data === 'pong') {
+                            return
+                        }
+                        
                         try {
                             const data = JSON.parse(event.data)
                             downloadProgress.value = data
