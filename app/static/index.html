@@ -182,6 +182,11 @@
         dialog.active {
             z-index: 1000;
         }
+        .menu-divider {
+            height: 1px;
+            background: var(--outline-variant);
+            margin: 0.5rem 0;
+        }
     </style>
 </head>
 <body class="dark">
@@ -213,29 +218,33 @@
                     <button class="circle transparent" data-ui="#menu-overflow">
                         <i>more_vert</i>
                     </button>
-                    <menu id="menu-overflow" class="no-wrap">
-                        <a @click="navigateToPage('home')">
-                            <i>home</i>
-                            <span>ホーム</span>
-                        </a>
-                        <a @click="navigateToPage('history')">
-                            <i>history</i>
-                            <span>ダウンロード履歴</span>
-                        </a>
-                        <div class="divider"></div>
-                        <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
-                            <i>code</i>
-                            <span>GitHub リポジトリ</span>
-                        </a>
-                        <a @click="toggleThemeManual">
-                            <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                            <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
-                        </a>
-                        <div class="divider"></div>
-                        <a>
-                            <i>info</i>
-                            <span>バージョン 2.0.0</span>
-                        </a>
+                    <menu id="menu-overflow">
+                        <ul class="list border">
+                            <li @click="navigateToPage('home')">
+                                <i>home</i>
+                                <span>ホーム</span>
+                            </li>
+                            <li @click="navigateToPage('history')">
+                                <i>history</i>
+                                <span>ダウンロード履歴</span>
+                            </li>
+                            <div class="menu-divider"></div>
+                            <li>
+                                <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: inherit; text-decoration: none; display: flex; align-items: center;">
+                                    <i>code</i>
+                                    <span>GitHub リポジトリ</span>
+                                </a>
+                            </li>
+                            <li @click="toggleThemeManual">
+                                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                                <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
+                            </li>
+                            <div class="menu-divider"></div>
+                            <li>
+                                <i>info</i>
+                                <span>バージョン 2.0.0</span>
+                            </li>
+                        </ul>
                     </menu>
                 </nav>
             </header>
