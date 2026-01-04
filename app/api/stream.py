@@ -4,7 +4,7 @@ import math
 import httpx
 from urllib.parse import quote, unquote, urljoin, urlparse
 from fastapi import APIRouter, Request, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse, Response, JSONResponse
+from fastapi.responses import StreamingResponse, Response, JSONResponse, PlainTextResponse
 from starlette.background import BackgroundTask
 import uuid
 
@@ -267,20 +267,27 @@ async def get_cached_manifest(manifest_id: str):
         
     body, meta = cached
     
-    # Explicit CORS headers with no caching to prevent reload issues
+    # Decode bytes to string for PlainTextResponse
+    try:
+        manifest_text = body.decode('utf-8')
+    except:
+        manifest_text = body.decode('utf-8', errors='ignore')
+    
+    # Explicit CORS headers
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
         "Access-Control-Expose-Headers": "Content-Length, Content-Type",
         "Access-Control-Max-Age": "86400",
-        "Cache-Control": "no-cache",  # Prevent manifest caching issues
-        "Content-Type": "application/x-mpegurl",
+        "Cache-Control": "no-cache",
     }
     
-    return Response(
-        content=body,
+    # Use PlainTextResponse to ensure proper text encoding
+    return PlainTextResponse(
+        content=manifest_text,
         status_code=200,
+        media_type="application/x-mpegurl",
         headers=headers
     )
 
@@ -451,7 +458,8 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         log_error(request, f"Get URL error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    base_url = str(request.base_url).rstrip("/")
+    # Get base URL properly from request
+    base_url = f"{request.url.scheme}://{request.url.netloc}"
     proxy_endpoint = f"{base_url}/proxy"
     
     final_content = b""
@@ -512,7 +520,8 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
             final_content = playlist_str.encode("utf-8")
             
-            log_info(request, f"Generated SABR manifest: {duration}s, {filesize} bytes, {math.ceil(duration / SABR_SEGMENT_DURATION)} segments")
+            # Debug: Log first 500 chars
+            log_info(request, f"Generated SABR manifest (first 500 chars): {playlist_str[:500]}")
 
     # 4. Save to cache and return URL
     manifest_id = str(uuid.uuid4())
