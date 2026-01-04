@@ -54,8 +54,9 @@ MANIFEST_TTL = 300 # 5 minutes cache for generated manifests
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    "Access-Control-Max-Age": "86400",
 }
 
 def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0) -> dict:
@@ -232,7 +233,7 @@ def generate_sabr_playlist(
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
-        "#EXT-X-INDEPENDENT-SEGMENTS",  # Important for Video.js
+        "#EXT-X-INDEPENDENT-SEGMENTS",
         f"#EXT-X-TARGETDURATION:{int(SABR_SEGMENT_DURATION) + 1}",
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
@@ -266,20 +267,20 @@ async def get_cached_manifest(manifest_id: str):
         
     body, meta = cached
     
-    # Explicit CORS headers for manifest
+    # Explicit CORS headers with no caching to prevent reload issues
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-        "Access-Control-Expose-Headers": "*",
-        "Cache-Control": "public, max-age=30",
-        "Content-Disposition": "inline; filename=playlist.m3u8",
+        "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Type",
+        "Access-Control-Max-Age": "86400",
+        "Cache-Control": "no-cache",  # Prevent manifest caching issues
+        "Content-Type": "application/x-mpegurl",
     }
     
     return Response(
         content=body,
         status_code=200,
-        media_type="application/x-mpegurl",
         headers=headers
     )
 
@@ -316,7 +317,8 @@ async def sabr_segment(
     
     if not r:
         raise HTTPException(status_code=502, detail="Segment fetch failed")
-        
+    
+    # Handle both 200 and 206 responses from upstream
     if r.status_code not in (200, 206):
         await r.aclose()
         raise HTTPException(status_code=502, detail=f"Upstream error: {r.status_code}")
@@ -332,6 +334,42 @@ async def sabr_segment(
         else:
             content_type = "video/mp2t"
 
+    # If upstream returned 200 (full content), we need to slice it
+    if r.status_code == 200:
+        # Read the full response and slice it
+        full_body = await r.aread()
+        await r.aclose()
+        
+        # Calculate actual slice
+        actual_start = start_byte
+        actual_end = min(end_byte, len(full_body) - 1)
+        
+        if actual_start >= len(full_body):
+            raise HTTPException(status_code=416, detail="Range not satisfiable")
+        
+        sliced_body = full_body[actual_start:actual_end + 1]
+        
+        # Explicit CORS headers for segments
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+            "Access-Control-Max-Age": "86400",
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {actual_start}-{actual_end}/{total}",
+            "Content-Length": str(len(sliced_body)),
+            "Cache-Control": "public, max-age=3600",
+        }
+        
+        return Response(
+            content=sliced_body,
+            status_code=206,
+            media_type=content_type,
+            headers=headers
+        )
+    
+    # Upstream returned 206, stream it directly
     async def close_upstream():
         await r.aclose()
 
@@ -339,10 +377,12 @@ async def sabr_segment(
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        "Access-Control-Max-Age": "86400",
         "Accept-Ranges": "bytes",
         "Content-Range": f"bytes {start_byte}-{end_byte}/{total}",
+        "Cache-Control": "public, max-age=3600",
     }
     
     if "content-length" in r.headers:
@@ -350,7 +390,7 @@ async def sabr_segment(
 
     return StreamingResponse(
         r.aiter_bytes(),
-        status_code=206,  # Partial Content
+        status_code=206,
         media_type=content_type,
         headers=headers,
         background=BackgroundTask(close_upstream)
@@ -472,8 +512,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
             final_content = playlist_str.encode("utf-8")
             
-            # Debug log the generated manifest
-            log_info(request, f"Generated SABR manifest ({len(final_content)} bytes, {duration}s, {filesize} bytes)")
+            log_info(request, f"Generated SABR manifest: {duration}s, {filesize} bytes, {math.ceil(duration / SABR_SEGMENT_DURATION)} segments")
 
     # 4. Save to cache and return URL
     manifest_id = str(uuid.uuid4())
