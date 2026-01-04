@@ -28,22 +28,38 @@
         .white-text {
             color: white !important;
         }
-        .center-progress {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 1000;
-        }
-        .download-progress-bar {
-            margin: 1rem 0;
+        .download-progress {
+            display: inline-block;
+            margin-left: 0.5rem;
         }
         .history-item {
             cursor: pointer;
             transition: background 0.2s;
+            margin-bottom: 0.5rem;
         }
         .history-item:hover {
             background: rgba(255,255,255,0.1);
+        }
+        .history-thumbnail {
+            width: 120px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-right: 1rem;
+        }
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+        .modal-overlay.active {
+            display: block;
+        }
+        dialog.active {
+            z-index: 1000;
         }
     </style>
 </head>
@@ -62,24 +78,22 @@
         </header>
 
         <!-- Left Drawer -->
-        <nav class="m l left" :class="{ active: drawerOpen }">
+        <nav class="left" :class="{ active: drawerOpen }">
             <header>
-                <button class="extra circle transparent" @click="toggleDrawer">
-                    <i>menu</i>
+                <button class="circle transparent" @click="toggleDrawer">
+                    <i>close</i>
                 </button>
-                <button class="extend square round">
-                    <i>widgets</i>
-                    <span>Explore</span>
-                </button>
+                <div class="max"></div>
             </header>
-            <a @click="showHistoryDialog = true">
+            <a @click="showPage('home')">
+                <i>home</i>
+                <span>ホーム</span>
+            </a>
+            <a @click="showPage('history')">
                 <i>history</i>
                 <span>ダウンロード履歴</span>
             </a>
-            <a @click="clearHistory">
-                <i>delete_sweep</i>
-                <span>履歴をクリア</span>
-            </a>
+            <div class="divider"></div>
             <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
                 <i>code</i>
                 <span>GitHub</span>
@@ -89,114 +103,140 @@
         <main class="responsive">
             <div class="space"></div>
 
-            <!-- Input Section -->
-            <article class="border">
-                <div class="padding">
-                    <h6>動画URLを入力</h6>
-                    <div class="field label border">
-                        <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
-                        <label>YouTube, ニコニコ動画, Twitter など</label>
-                    </div>
-                    <nav class="right-align">
-                        <button @click="pasteFromClipboard" :disabled="loading" class="border">
-                            <i>content_paste</i>
-                            <span>貼り付け</span>
-                        </button>
-                        <button @click="fetchInfo" :disabled="loading || !url" class="primary">
-                            <i>{{ loading ? 'progress_activity' : 'search' }}</i>
-                            <span>{{ loading ? '取得中...' : '解析' }}</span>
-                        </button>
-                    </nav>
-                    <div v-if="error" class="small-padding">
-                        <article class="red-border round">
-                            <i>error</i>
-                            <p>{{ error }}</p>
-                        </article>
-                    </div>
-                </div>
-            </article>
-
-            <!-- Result Section -->
-            <article v-if="info" class="border video-info-card">
-                <!-- Download Progress -->
-                <div v-if="downloading" class="download-progress-bar padding">
-                    <progress value="50" max="100"></progress>
-                    <p class="center-align">ダウンロード中...</p>
-                </div>
-
-                <div class="grid">
-                    <div class="s12 m4">
-                        <div class="thumbnail-container">
-                            <img :src="info.thumbnail" :alt="info.title">
+            <!-- Home Page -->
+            <div v-if="currentPage === 'home'">
+                <!-- Input Section -->
+                <article class="border">
+                    <div class="padding">
+                        <h6>動画URLを入力</h6>
+                        <div class="field label border">
+                            <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
+                            <label>YouTube, ニコニコ動画, Twitter など</label>
+                        </div>
+                        <nav class="right-align">
+                            <button @click="pasteFromClipboard" :disabled="loading" class="border">
+                                <i>content_paste</i>
+                                <span>貼り付け</span>
+                            </button>
+                            <button @click="fetchInfo" :disabled="loading || !url" class="primary">
+                                <i>search</i>
+                                <span>解析</span>
+                                <progress v-if="loading" class="circle small download-progress"></progress>
+                            </button>
+                        </nav>
+                        <div v-if="error" class="small-padding">
+                            <article class="red-border round">
+                                <i>error</i>
+                                <p>{{ error }}</p>
+                            </article>
                         </div>
                     </div>
-                    <div class="s12 m8">
-                        <div class="padding">
-                            <h6 class="small">{{ info.title }}</h6>
-                            <p class="small-margin">
-                                <i>person</i>
-                                <span>{{ info.uploader || 'Unknown' }}</span>
-                            </p>
-                            <div class="row small-margin">
-                                <i>schedule</i>
-                                <span>{{ formatDuration(info.duration) }}</span>
-                                <span class="small-margin"> • </span>
-                                <i>visibility</i>
-                                <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
-                            </div>
+                </article>
 
-                            <!-- Quality Selection -->
-                            <div class="field suffix border quality-selector">
-                                <select v-model="selectedQuality">
-                                    <option value="">最高画質 (Best)</option>
-                                    <option value="1080">1080p</option>
-                                    <option value="720">720p</option>
-                                    <option value="480">480p</option>
-                                    <option value="audio">音声のみ (Audio)</option>
-                                </select>
-                                <i>high_quality</i>
+                <!-- Result Section -->
+                <article v-if="info" class="border video-info-card">
+                    <div class="grid">
+                        <div class="s12 m4">
+                            <div class="thumbnail-container">
+                                <img :src="info.thumbnail" :alt="info.title">
                             </div>
-
-                            <!-- Action Buttons -->
-                            <nav>
-                                <button @click="download" :disabled="downloading" class="responsive green white-text">
-                                    <i>download</i>
-                                    <span>ダウンロード</span>
-                                </button>
-                            </nav>
                         </div>
-                    </div>
-                </div>
-            </article>
+                        <div class="s12 m8">
+                            <div class="padding">
+                                <h6 class="small">{{ info.title }}</h6>
+                                <p class="small-margin">
+                                    <i>person</i>
+                                    <span>{{ info.uploader || 'Unknown' }}</span>
+                                </p>
+                                <div class="row small-margin">
+                                    <i>schedule</i>
+                                    <span>{{ formatDuration(info.duration) }}</span>
+                                    <span class="small-margin"> • </span>
+                                    <i>visibility</i>
+                                    <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
+                                </div>
 
-            <div class="space"></div>
-        </main>
+                                <!-- Quality Selection -->
+                                <div class="field suffix border quality-selector">
+                                    <select v-model="selectedQuality">
+                                        <option value="">最高画質 (Best)</option>
+                                        <option value="1080">1080p</option>
+                                        <option value="720">720p</option>
+                                        <option value="480">480p</option>
+                                        <option value="audio">音声のみ (Audio)</option>
+                                    </select>
+                                    <i>high_quality</i>
+                                </div>
 
-        <!-- Loading Indicator (Center) -->
-        <div v-if="loading && !info" class="center-progress">
-            <progress class="circle"></progress>
-        </div>
-
-        <!-- History Dialog -->
-        <dialog v-if="showHistoryDialog" class="active">
-            <h5>ダウンロード履歴</h5>
-            <div v-if="history.length === 0">
-                <p>履歴がありません</p>
-            </div>
-            <div v-else>
-                <article v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
-                    <div class="row">
-                        <img :src="item.thumbnail" class="small" style="width: 80px; height: 60px; object-fit: cover; border-radius: 4px;">
-                        <div class="max">
-                            <p class="bold">{{ item.title }}</p>
-                            <p class="small">{{ item.uploader }}</p>
-                            <p class="small">{{ new Date(item.timestamp).toLocaleString('ja-JP') }}</p>
+                                <!-- Action Buttons -->
+                                <nav>
+                                    <button @click="download" :disabled="downloading" class="responsive green white-text">
+                                        <i>download</i>
+                                        <span>ダウンロード</span>
+                                        <progress v-if="downloading" class="circle small download-progress"></progress>
+                                    </button>
+                                </nav>
+                            </div>
                         </div>
                     </div>
                 </article>
             </div>
+
+            <!-- History Page -->
+            <div v-if="currentPage === 'history'">
+                <article class="border">
+                    <div class="padding">
+                        <div class="row">
+                            <h5 class="max">ダウンロード履歴</h5>
+                            <button @click="confirmClearHistory" class="border">
+                                <i>delete_sweep</i>
+                                <span>クリア</span>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <div v-if="history.length === 0" class="padding">
+                    <article class="border center-align">
+                        <div class="padding">
+                            <i class="extra">history</i>
+                            <p>履歴がありません</p>
+                        </div>
+                    </article>
+                </div>
+
+                <article v-else v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
+                    <div class="row padding">
+                        <img :src="item.thumbnail" class="history-thumbnail">
+                        <div class="max">
+                            <p class="bold">{{ item.title }}</p>
+                            <p class="small">
+                                <i>person</i>
+                                {{ item.uploader }}
+                            </p>
+                            <p class="small">
+                                <i>schedule</i>
+                                {{ new Date(item.timestamp).toLocaleString('ja-JP') }}
+                            </p>
+                        </div>
+                        <i>download</i>
+                    </div>
+                </article>
+            </div>
+
+            <div class="space"></div>
+        </main>
+
+        <!-- Modal Overlay -->
+        <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
+
+        <!-- Delete Confirmation Modal -->
+        <dialog :class="{ active: showDeleteModal }">
+            <h5>履歴を削除</h5>
+            <p>すべてのダウンロード履歴を削除しますか？</p>
             <nav class="right-align">
-                <button @click="showHistoryDialog = false" class="border">閉じる</button>
+                <button @click="showDeleteModal = false" class="border">キャンセル</button>
+                <button @click="clearHistory" class="red white-text">削除</button>
             </nav>
         </dialog>
     </div>
@@ -213,7 +253,8 @@
                 const error = ref(null)
                 const selectedQuality = ref('')
                 const drawerOpen = ref(false)
-                const showHistoryDialog = ref(false)
+                const currentPage = ref('home')
+                const showDeleteModal = ref(false)
                 const history = ref([])
 
                 // Cookie utilities
@@ -259,21 +300,30 @@
                     setCookie('downloadHistory', history.value)
                 }
 
+                const confirmClearHistory = () => {
+                    showDeleteModal.value = true
+                }
+
                 const clearHistory = () => {
-                    if (confirm('履歴をすべて削除しますか？')) {
-                        history.value = []
-                        setCookie('downloadHistory', [])
-                    }
+                    history.value = []
+                    setCookie('downloadHistory', [])
+                    showDeleteModal.value = false
                 }
 
                 const loadFromHistory = (item) => {
                     url.value = item.url
-                    showHistoryDialog.value = false
+                    currentPage.value = 'home'
+                    drawerOpen.value = false
                     fetchInfo()
                 }
 
                 const toggleDrawer = () => {
                     drawerOpen.value = !drawerOpen.value
+                }
+
+                const showPage = (page) => {
+                    currentPage.value = page
+                    drawerOpen.value = false
                 }
 
                 const pasteFromClipboard = async () => {
@@ -367,9 +417,9 @@
 
                 return {
                     url, info, loading, downloading, error, selectedQuality,
-                    drawerOpen, showHistoryDialog, history,
-                    fetchInfo, formatDuration, download, toggleDrawer,
-                    pasteFromClipboard, clearHistory, loadFromHistory, saveToHistory
+                    drawerOpen, currentPage, showDeleteModal, history,
+                    fetchInfo, formatDuration, download, toggleDrawer, showPage,
+                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory
                 }
             }
         }).mount('#app')
