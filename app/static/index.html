@@ -210,9 +210,33 @@
             <header>
                 <nav>
                     <h6 class="max">yt-dlp Web Client</h6>
-                    <button class="circle transparent">
+                    <button class="circle transparent" data-ui="#menu-overflow">
                         <i>more_vert</i>
                     </button>
+                    <menu id="menu-overflow" class="no-wrap">
+                        <a @click="navigateToPage('home')">
+                            <i>home</i>
+                            <span>ホーム</span>
+                        </a>
+                        <a @click="navigateToPage('history')">
+                            <i>history</i>
+                            <span>ダウンロード履歴</span>
+                        </a>
+                        <div class="divider"></div>
+                        <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
+                            <i>code</i>
+                            <span>GitHub リポジトリ</span>
+                        </a>
+                        <a @click="toggleThemeManual">
+                            <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                            <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
+                        </a>
+                        <div class="divider"></div>
+                        <a>
+                            <i>info</i>
+                            <span>バージョン 2.0.0</span>
+                        </a>
+                    </menu>
                 </nav>
             </header>
 
