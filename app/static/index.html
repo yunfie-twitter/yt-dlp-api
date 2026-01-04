@@ -215,18 +215,14 @@
             <header>
                 <nav>
                     <h6 class="max">yt-dlp Web Client</h6>
-                    <button class="circle transparent" data-ui="#menu-overflow">
-                        <i>more_vert</i>
+                    <button class="circle transparent" data-ui="#settings-menu">
+                        <i>settings</i>
                     </button>
-                    <menu id="menu-overflow">
+                    <menu id="settings-menu">
                         <ul class="list border">
-                            <li @click="navigateToPage('home')">
-                                <i>home</i>
-                                <span>ホーム</span>
-                            </li>
-                            <li @click="navigateToPage('history')">
-                                <i>history</i>
-                                <span>ダウンロード履歴</span>
+                            <li @click="toggleThemeManual">
+                                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                                <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
                             </li>
                             <div class="menu-divider"></div>
                             <li>
@@ -234,10 +230,6 @@
                                     <i>code</i>
                                     <span>GitHub リポジトリ</span>
                                 </a>
-                            </li>
-                            <li @click="toggleThemeManual">
-                                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                                <span>{{ isDarkMode ? 'ライトモード' : 'ダークモード' }}</span>
                             </li>
                             <div class="menu-divider"></div>
                             <li>
