@@ -55,7 +55,7 @@ CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "*",
-    "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
 }
 
 def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0) -> dict:
@@ -102,7 +102,7 @@ async def shutdown_event():
 async def fetch_with_retry(
     url: str,
     request: Request | None,
-    max_retry: int = 2,  # Reduced from 4 to 2
+    max_retry: int = 2,
     method: str = "GET",
     headers: dict | None = None
 ) -> httpx.Response | None:
@@ -232,6 +232,7 @@ def generate_sabr_playlist(
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
+        "#EXT-X-INDEPENDENT-SEGMENTS",  # Important for Video.js
         f"#EXT-X-TARGETDURATION:{int(SABR_SEGMENT_DURATION) + 1}",
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
@@ -242,7 +243,7 @@ def generate_sabr_playlist(
         lines.append(f"{segment_base}&seq={i}")
 
     lines.append("#EXT-X-ENDLIST")
-    return "\n".join(lines) + "\n"  # Add trailing newline
+    return "\n".join(lines) + "\n"
 
 
 @router.options("/stream")
@@ -265,16 +266,20 @@ async def get_cached_manifest(manifest_id: str):
         
     body, meta = cached
     
-    headers = CORS_HEADERS.copy()
-    headers.update({
+    # Explicit CORS headers for manifest
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Expose-Headers": "*",
         "Cache-Control": "public, max-age=30",
         "Content-Disposition": "inline; filename=playlist.m3u8",
-    })
+    }
     
     return Response(
         content=body,
         status_code=200,
-        media_type="application/x-mpegurl",  # Better VLC compatibility
+        media_type="application/x-mpegurl",
         headers=headers
     )
 
@@ -295,7 +300,7 @@ async def sabr_segment(
     end_byte = start_byte + bps - 1
     
     if start_byte >= total:
-        raise HTTPException(status_code=404, detail="Segment out of range")
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
         
     if end_byte >= total:
         end_byte = total - 1
@@ -330,14 +335,22 @@ async def sabr_segment(
     async def close_upstream():
         await r.aclose()
 
-    headers = CORS_HEADERS.copy()
-    headers["Accept-Ranges"] = "bytes"
+    # Explicit CORS headers for segments
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start_byte}-{end_byte}/{total}",
+    }
+    
     if "content-length" in r.headers:
         headers["Content-Length"] = r.headers["content-length"]
 
     return StreamingResponse(
         r.aiter_bytes(),
-        status_code=200,
+        status_code=206,  # Partial Content
         media_type=content_type,
         headers=headers,
         background=BackgroundTask(close_upstream)
@@ -449,6 +462,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             final_content = (
                 "#EXTM3U\n"
                 "#EXT-X-VERSION:3\n"
+                "#EXT-X-INDEPENDENT-SEGMENTS\n"
                 "#EXT-X-TARGETDURATION:10\n"
                 "#EXTINF:10.0,\n"
                 f"{proxy_url}\n"
@@ -459,8 +473,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             final_content = playlist_str.encode("utf-8")
             
             # Debug log the generated manifest
-            log_info(request, f"Generated SABR manifest ({len(final_content)} bytes):")
-            log_info(request, final_content.decode('utf-8')[:500])  # First 500 chars
+            log_info(request, f"Generated SABR manifest ({len(final_content)} bytes, {duration}s, {filesize} bytes)")
 
     # 4. Save to cache and return URL
     manifest_id = str(uuid.uuid4())
