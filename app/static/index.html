@@ -191,19 +191,41 @@
             background: rgba(0, 0, 0, 0.5);
             z-index: 999;
             display: none;
+            align-items: center;
+            justify-content: center;
         }
         .modal-overlay.active {
-            display: block;
+            display: flex;
+        }
+        dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            margin: 0;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: none;
         }
         dialog.active {
+            display: block;
             z-index: 1000;
         }
         .settings-item {
-            padding: 1rem;
+            padding: 1.5rem;
             border-bottom: 1px solid var(--outline-variant);
         }
         .settings-item:last-child {
             border-bottom: none;
+        }
+        .settings-item h6 {
+            margin-bottom: 0.5rem;
+        }
+        .settings-item .small {
+            margin-top: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
     </style>
 </head>
@@ -429,14 +451,14 @@
         </dialog>
 
         <!-- Settings Dialog -->
-        <dialog :class="{ active: showSettingsModal }">
-            <h5>設定</h5>
+        <dialog :class="{ active: showSettingsModal }" style="min-width: 400px; max-width: 500px;">
+            <h5 style="margin-bottom: 1.5rem;">設定</h5>
             
             <div class="settings-item">
                 <div class="row">
                     <div class="max">
                         <h6>外観</h6>
-                        <p class="small">テーマを変更</p>
+                        <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">テーマを変更</p>
                     </div>
                     <label class="switch">
                         <input type="checkbox" :checked="isDarkMode" @change="toggleTheme">
@@ -463,7 +485,7 @@
                 </p>
             </div>
 
-            <nav class="right-align">
+            <nav class="right-align" style="margin-top: 1rem;">
                 <button @click="showSettingsModal = false" class="primary">閉じる</button>
             </nav>
         </dialog>
