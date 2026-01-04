@@ -1,432 +1,250 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>yt-dlp Web Client</title>
-    <link href="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.css" rel="stylesheet">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <style>
-        .thumbnail-container {
-            position: relative;
-            overflow: hidden;
-            border-radius: 12px;
-        }
-        .thumbnail-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        .video-info-card {
-            margin-top: 1rem;
-        }
-        .quality-selector {
-            margin: 1rem 0;
-        }
-        .download-progress {
-            display: inline-block;
-            margin-left: 0.5rem;
-        }
-        .history-item {
-            cursor: pointer;
-            transition: background 0.2s;
-            margin-bottom: 0.5rem;
-        }
-        .history-item:hover {
-            background: rgba(255,255,255,0.1);
-        }
-        .history-thumbnail {
-            width: 120px;
-            height: 90px;
-            object-fit: cover;
-            border-radius: 8px;
-            margin-right: 1rem;
-        }
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 999;
-            display: none;
-        }
-        .modal-overlay.active {
-            display: block;
-        }
-        dialog.active {
-            z-index: 1000;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yt-dlp Web Client</title>
+
+<link href="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.css" rel="stylesheet">
+<script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+<style>
+/* ===== 共通 ===== */
+.app-title {
+    font-weight: 600;
+    letter-spacing: .5px;
+}
+
+.card {
+    border-radius: 16px;
+}
+
+.soft {
+    color: rgba(255,255,255,.65);
+}
+
+/* ===== サムネ ===== */
+.thumbnail {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 16px;
+}
+
+.thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.duration-badge {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0,0,0,.75);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+/* ===== 動画情報 ===== */
+.video-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.meta-row {
+    display: flex;
+    gap: 12px;
+    font-size: 13px;
+    margin-top: 6px;
+}
+
+/* ===== ダウンロード ===== */
+.download-box {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,.05);
+}
+
+/* ===== 履歴 ===== */
+.history-card {
+    transition: transform .15s, background .15s;
+}
+.history-card:hover {
+    transform: translateY(-2px);
+    background: rgba(255,255,255,.05);
+}
+
+/* ===== モーダル ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.65);
+    z-index: 900;
+}
+dialog {
+    z-index: 1000;
+    border-radius: 16px;
+}
+</style>
 </head>
+
 <body class="dark">
-    <div id="app">
-        <header>
-            <nav>
-                <button class="circle transparent" data-ui="#drawer-left">
-                    <i>menu</i>
-                </button>
-                <h6 class="max">yt-dlp Web Client</h6>
-                <button class="circle transparent">
-                    <i>more_vert</i>
-                </button>
-            </nav>
-        </header>
+<div id="app">
 
-        <nav id="drawer-left" class="left">
-            <header>
-                <img src="https://www.beercss.com/favicon.png" class="circle">
-                <h6>yt-dlp Web</h6>
-            </header>
-            <a @click="navigateToPage('home')">
-                <i>home</i>
-                <span>ホーム</span>
-            </a>
-            <a @click="navigateToPage('history')">
-                <i>history</i>
-                <span>ダウンロード履歴</span>
-            </a>
-            <div class="divider"></div>
-            <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
-                <i>code</i>
-                <span>GitHub リポジトリ</span>
-            </a>
-            <div class="divider"></div>
-            <label class="row">
-                <span>ダークモード</span>
-                <label class="switch">
-                    <input type="checkbox" checked @change="toggleTheme">
-                    <span></span>
-                </label>
-            </label>
-        </nav>
+<header>
+<nav>
+<button class="circle transparent" data-ui="#drawer-left">
+<i>menu</i>
+</button>
+<h6 class="max app-title">yt-dlp Web Client</h6>
+</nav>
+</header>
 
-        <main class="responsive">
-            <div class="space"></div>
+<nav id="drawer-left" class="left">
+<header>
+<img src="https://www.beercss.com/favicon.png" class="circle">
+<h6>yt-dlp Web</h6>
+</header>
 
-            <div v-if="currentPage === 'home'">
-                <article class="border">
-                    <div class="padding">
-                        <h6>動画URLを入力</h6>
-                        <div class="field label border">
-                            <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
-                            <label>YouTube, ニコニコ動画, Twitter など</label>
-                        </div>
-                        <nav class="right-align">
-                            <button @click="pasteFromClipboard" :disabled="loading" class="primary">
-                                <i>content_paste</i>
-                                <span>貼り付け</span>
-                            </button>
-                            <button @click="fetchInfo" :disabled="loading || !url" class="primary">
-                                <i>search</i>
-                                <span>解析</span>
-                                <progress v-if="loading" class="circle small download-progress"></progress>
-                            </button>
-                        </nav>
-                        <div v-if="error" class="small-padding">
-                            <article class="red-border round">
-                                <i>error</i>
-                                <p>{{ error }}</p>
-                            </article>
-                        </div>
-                    </div>
-                </article>
+<a @click="navigate('home')"><i>home</i><span>ホーム</span></a>
+<a @click="navigate('history')"><i>history</i><span>履歴</span></a>
+</nav>
 
-                <article v-if="info" class="border video-info-card">
-                    <div class="grid">
-                        <div class="s12 m4">
-                            <div class="thumbnail-container">
-                                <img :src="info.thumbnail" :alt="info.title">
-                            </div>
-                        </div>
-                        <div class="s12 m8">
-                            <div class="padding">
-                                <h6 class="small">{{ info.title }}</h6>
-                                <p class="small-margin">
-                                    <i>person</i>
-                                    <span>{{ info.uploader || 'Unknown' }}</span>
-                                </p>
-                                <div class="row small-margin">
-                                    <i>schedule</i>
-                                    <span>{{ formatDuration(info.duration) }}</span>
-                                    <span class="small-margin"> • </span>
-                                    <i>visibility</i>
-                                    <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
-                                </div>
+<main class="responsive">
 
-                                <div class="field suffix border quality-selector">
-                                    <select v-model="selectedQuality">
-                                        <option value="">最高画質 (Best)</option>
-                                        <option value="1080">1080p</option>
-                                        <option value="720">720p</option>
-                                        <option value="480">480p</option>
-                                        <option value="audio">音声のみ (Audio)</option>
-                                    </select>
-                                    <i>high_quality</i>
-                                </div>
+<!-- ===== HOME ===== -->
+<section v-if="page==='home'">
 
-                                <nav>
-                                    <button @click="download" :disabled="downloading" class="responsive primary">
-                                        <i>download</i>
-                                        <span>ダウンロード</span>
-                                        <progress v-if="downloading" class="circle small download-progress"></progress>
-                                    </button>
-                                </nav>
-                            </div>
-                        </div>
-                    </div>
-                </article>
-            </div>
+<article class="border card">
+<div class="padding">
+<h6>動画URL</h6>
+<div class="field label border">
+<input v-model="url" @keyup.enter="fetchInfo">
+<label>YouTube / Twitter / ニコ動</label>
+</div>
 
-            <div v-if="currentPage === 'history'">
-                <article class="border">
-                    <div class="padding">
-                        <div class="row">
-                            <h5 class="max">ダウンロード履歴</h5>
-                            <button @click="confirmClearHistory" class="primary" :disabled="history.length === 0">
-                                <i>delete_sweep</i>
-                                <span>クリア</span>
-                            </button>
-                        </div>
-                    </div>
-                </article>
+<nav class="right-align">
+<button class="primary" @click="fetchInfo" :disabled="loading">
+<i>search</i>
+<span>{{ loading ? '解析中…' : '解析' }}</span>
+</button>
+</nav>
+</div>
+</article>
 
-                <div v-if="history.length === 0" class="padding">
-                    <article class="border center-align">
-                        <div class="padding">
-                            <i class="extra">history</i>
-                            <p>履歴がありません</p>
-                            <button @click="navigateToPage('home')" class="primary">
-                                <i>home</i>
-                                <span>ホームに戻る</span>
-                            </button>
-                        </div>
-                    </article>
-                </div>
+<!-- 動画情報 -->
+<article v-if="info" class="border card">
+<div class="grid">
 
-                <article v-else v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
-                    <div class="row padding">
-                        <img :src="item.thumbnail" class="history-thumbnail" :alt="item.title">
-                        <div class="max">
-                            <p class="bold">{{ item.title }}</p>
-                            <p class="small">
-                                <i>person</i>
-                                {{ item.uploader }}
-                            </p>
-                            <p class="small">
-                                <i>schedule</i>
-                                {{ new Date(item.timestamp).toLocaleString('ja-JP') }}
-                            </p>
-                        </div>
-                        <i>download</i>
-                    </div>
-                </article>
-            </div>
+<div class="s12 m5">
+<div class="thumbnail">
+<img :src="info.thumbnail">
+<div class="duration-badge">
+{{ formatDuration(info.duration) }}
+</div>
+</div>
+</div>
 
-            <div class="space"></div>
-        </main>
+<div class="s12 m7">
+<div class="padding">
 
-        <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
+<div class="video-title">{{ info.title }}</div>
 
-        <dialog :class="{ active: showDeleteModal }">
-            <h5>履歴を削除</h5>
-            <p>すべてのダウンロード履歴を削除しますか?</p>
-            <nav class="right-align">
-                <button @click="showDeleteModal = false" class="border">キャンセル</button>
-                <button @click="clearHistory" class="primary">削除</button>
-            </nav>
-        </dialog>
-    </div>
+<div class="meta-row soft">
+<span><i>person</i> {{ info.uploader }}</span>
+<span><i>visibility</i> {{ info.view_count?.toLocaleString() }}</span>
+</div>
 
-    <script>
-        const { createApp, ref, onMounted } = Vue
+<div class="download-box">
+<div class="field suffix border">
+<select v-model="quality">
+<option value="">最高画質</option>
+<option value="1080">1080p</option>
+<option value="720">720p</option>
+<option value="audio">音声のみ</option>
+</select>
+<i>high_quality</i>
+</div>
 
-        createApp({
-            setup() {
-                const url = ref('')
-                const info = ref(null)
-                const loading = ref(false)
-                const downloading = ref(false)
-                const error = ref(null)
-                const selectedQuality = ref('')
-                const currentPage = ref('home')
-                const showDeleteModal = ref(false)
-                const history = ref([])
+<button class="primary responsive" @click="download" :disabled="downloading">
+<i>download</i>
+<span>{{ downloading ? 'ダウンロード中…' : 'ダウンロード' }}</span>
+</button>
+</div>
 
-                const setCookie = (name, value, days = 365) => {
-                    const expires = new Date()
-                    expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
-                    document.cookie = `${name}=${encodeURIComponent(JSON.stringify(value))};expires=${expires.toUTCString()};path=/`
-                }
+</div>
+</div>
+</article>
 
-                const getCookie = (name) => {
-                    const nameEQ = name + '='
-                    const ca = document.cookie.split(';')
-                    for (let i = 0; i < ca.length; i++) {
-                        let c = ca[i]
-                        while (c.charAt(0) === ' ') c = c.substring(1, c.length)
-                        if (c.indexOf(nameEQ) === 0) {
-                            return JSON.parse(decodeURIComponent(c.substring(nameEQ.length, c.length)))
-                        }
-                    }
-                    return null
-                }
+</section>
 
-                const closeDrawer = () => {
-                    const drawer = document.querySelector('#drawer-left')
-                    if (drawer && drawer.classList.contains('active')) {
-                        drawer.classList.remove('active')
-                    }
-                }
+<!-- ===== HISTORY ===== -->
+<section v-if="page==='history'">
 
-                const loadHistory = () => {
-                    const saved = getCookie('downloadHistory')
-                    if (saved) {
-                        history.value = saved
-                    }
-                }
+<h5 class="padding">ダウンロード履歴</h5>
 
-                const saveToHistory = (videoInfo) => {
-                    const historyItem = {
-                        url: url.value,
-                        title: videoInfo.title,
-                        thumbnail: videoInfo.thumbnail,
-                        uploader: videoInfo.uploader,
-                        timestamp: Date.now()
-                    }
-                    history.value.unshift(historyItem)
-                    if (history.value.length > 20) {
-                        history.value = history.value.slice(0, 20)
-                    }
-                    setCookie('downloadHistory', history.value)
-                }
+<article v-for="item in history" class="border card history-card">
+<div class="row padding">
+<img :src="item.thumbnail" style="width:120px;border-radius:12px">
+<div class="max">
+<p class="bold">{{ item.title }}</p>
+<p class="soft small">{{ item.uploader }}</p>
+</div>
+</div>
+</article>
 
-                const confirmClearHistory = () => {
-                    showDeleteModal.value = true
-                }
+</section>
 
-                const clearHistory = () => {
-                    history.value = []
-                    setCookie('downloadHistory', [])
-                    showDeleteModal.value = false
-                }
+</main>
 
-                const loadFromHistory = (item) => {
-                    url.value = item.url
-                    currentPage.value = 'home'
-                    closeDrawer()
-                    fetchInfo()
-                }
+</div>
 
-                const navigateToPage = (page) => {
-                    currentPage.value = page
-                    closeDrawer()
-                }
+<script>
+const {createApp,ref} = Vue
 
-                const toggleTheme = (event) => {
-                    if (event.target.checked) {
-                        document.body.classList.add('dark')
-                        document.body.classList.remove('light')
-                    } else {
-                        document.body.classList.add('light')
-                        document.body.classList.remove('dark')
-                    }
-                }
+createApp({
+setup(){
+const url=ref('')
+const info=ref(null)
+const loading=ref(false)
+const downloading=ref(false)
+const quality=ref('')
+const page=ref('home')
+const history=ref([])
 
-                const pasteFromClipboard = async () => {
-                    try {
-                        const text = await navigator.clipboard.readText()
-                        url.value = text
-                    } catch (e) {
-                        error.value = 'クリップボードからの読み取りに失敗しました'
-                    }
-                }
+const navigate=p=>page.value=p
 
-                const fetchInfo = async () => {
-                    if (!url.value) return
-                    loading.value = true
-                    error.value = null
-                    info.value = null
-                    
-                    try {
-                        const res = await fetch('/info', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: url.value })
-                        })
-                        if (!res.ok) {
-                            const errorData = await res.json()
-                            throw new Error(errorData.detail || '情報の取得に失敗しました')
-                        }
-                        info.value = await res.json()
-                    } catch (e) {
-                        error.value = e.message
-                    } finally {
-                        loading.value = false
-                    }
-                }
+const fetchInfo=async()=>{
+loading.value=true
+const r=await fetch('/info',{method:'POST',body:JSON.stringify({url:url.value})})
+info.value=await r.json()
+loading.value=false
+}
 
-                const formatDuration = (seconds) => {
-                    if (!seconds) return 'Live'
-                    const h = Math.floor(seconds / 3600)
-                    const m = Math.floor((seconds % 3600) / 60)
-                    const s = seconds % 60
-                    return h > 0 
-                        ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-                        : `${m}:${s.toString().padStart(2, '0')}`
-                }
+const download=async()=>{
+downloading.value=true
+await fetch('/download',{method:'POST',body:JSON.stringify({url:url.value})})
+history.value.unshift(info.value)
+downloading.value=false
+}
 
-                const download = async () => {
-                    if (!info.value) return
-                    downloading.value = true
-                    error.value = null
-                    
-                    try {
-                        const payload = { url: url.value }
-                        if (selectedQuality.value === 'audio') {
-                            payload.audio_format = 'mp3'
-                        } else if (selectedQuality.value) {
-                            payload.quality = parseInt(selectedQuality.value)
-                        }
-                        
-                        const res = await fetch('/download', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        })
-                        
-                        if (!res.ok) throw new Error('ダウンロードに失敗しました')
-                        
-                        const blob = await res.blob()
-                        const downloadUrl = window.URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = downloadUrl
-                        a.download = `${info.value.title || 'video'}.${selectedQuality.value === 'audio' ? 'mp3' : 'mp4'}`
-                        document.body.appendChild(a)
-                        a.click()
-                        window.URL.revokeObjectURL(downloadUrl)
-                        document.body.removeChild(a)
-                        
-                        saveToHistory(info.value)
-                    } catch (e) {
-                        error.value = e.message
-                    } finally {
-                        downloading.value = false
-                    }
-                }
+const formatDuration=s=>{
+if(!s) return 'LIVE'
+const m=Math.floor(s/60)
+const sec=s%60
+return `${m}:${sec.toString().padStart(2,'0')}`
+}
 
-                onMounted(() => {
-                    loadHistory()
-                })
+return{url,info,loading,downloading,quality,page,history,navigate,fetchInfo,download,formatDuration}
+}
+}).mount('#app')
+</script>
 
-                return {
-                    url, info, loading, downloading, error, selectedQuality,
-                    currentPage, showDeleteModal, history,
-                    fetchInfo, formatDuration, download, navigateToPage,
-                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, toggleTheme
-                }
-            }
-        }).mount('#app')
-    </script>
 </body>
 </html>
