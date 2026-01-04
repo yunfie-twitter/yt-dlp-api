@@ -25,9 +25,6 @@
         .quality-selector {
             margin: 1rem 0;
         }
-        .white-text {
-            color: white !important;
-        }
         .download-progress {
             display: inline-block;
             margin-left: 0.5rem;
@@ -116,7 +113,7 @@
                             <label>YouTube, ニコニコ動画, Twitter など</label>
                         </div>
                         <nav class="right-align">
-                            <button @click="pasteFromClipboard" :disabled="loading" class="border">
+                            <button @click="pasteFromClipboard" :disabled="loading" class="primary">
                                 <i>content_paste</i>
                                 <span>貼り付け</span>
                             </button>
@@ -169,7 +166,7 @@
                                 </div>
 
                                 <nav>
-                                    <button @click="download" :disabled="downloading" class="responsive green white-text">
+                                    <button @click="download" :disabled="downloading" class="responsive primary">
                                         <i>download</i>
                                         <span>ダウンロード</span>
                                         <progress v-if="downloading" class="circle small download-progress"></progress>
@@ -186,7 +183,7 @@
                     <div class="padding">
                         <div class="row">
                             <h5 class="max">ダウンロード履歴</h5>
-                            <button @click="confirmClearHistory" class="border" :disabled="history.length === 0">
+                            <button @click="confirmClearHistory" class="primary" :disabled="history.length === 0">
                                 <i>delete_sweep</i>
                                 <span>クリア</span>
                             </button>
@@ -199,7 +196,7 @@
                         <div class="padding">
                             <i class="extra">history</i>
                             <p>履歴がありません</p>
-                            <button @click="navigateToPage('home')" class="border">
+                            <button @click="navigateToPage('home')" class="primary">
                                 <i>home</i>
                                 <span>ホームに戻る</span>
                             </button>
@@ -236,7 +233,7 @@
             <p>すべてのダウンロード履歴を削除しますか?</p>
             <nav class="right-align">
                 <button @click="showDeleteModal = false" class="border">キャンセル</button>
-                <button @click="clearHistory" class="red white-text">削除</button>
+                <button @click="clearHistory" class="primary">削除</button>
             </nav>
         </dialog>
     </div>
