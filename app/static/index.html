@@ -3,89 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YTDLP Web Client</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>yt-dlp Web Client</title>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <style>
+        .video-container {
+            max-width: 100%;
+            margin: 1rem 0;
+        }
+        .thumbnail-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 12px;
+        }
+        .thumbnail-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .play-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.3);
+            opacity: 0;
+            transition: opacity 0.3s;
+            cursor: pointer;
+        }
+        .thumbnail-container:hover .play-overlay {
+            opacity: 1;
+        }
+        .video-info-card {
+            margin-top: 1rem;
+        }
+        .quality-selector {
+            margin: 1rem 0;
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
-    <div id="app" class="container mx-auto px-4 py-8 max-w-4xl">
-        <header class="mb-8 flex items-center gap-4">
-            <h1 class="text-3xl font-bold text-blue-400">Yt-dlp Web</h1>
-            <span class="text-xs bg-blue-900 px-2 py-1 rounded">API Client</span>
-        </header>
+<body class="dark">
+    <div id="app">
+        <nav class="primary">
+            <h5 class="max">yt-dlp Web Client</h5>
+            <button class="circle transparent">
+                <i>dark_mode</i>
+            </button>
+        </nav>
 
-        <!-- Input Section -->
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
-            <div class="flex gap-4">
-                <input v-model="url" @keyup.enter="fetchInfo" type="text" 
-                    placeholder="動画URLを入力 (YouTube, NicoNico, Twitter...)" 
-                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:outline-none focus:border-blue-500">
-                <button @click="fetchInfo" :disabled="loading"
-                    class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-bold disabled:opacity-50 transition">
-                    {{ loading ? '取得中...' : '解析' }}
-                </button>
-            </div>
-            <p v-if="error" class="text-red-400 mt-2 text-sm">{{ error }}</p>
-        </div>
+        <main class="responsive">
+            <div class="space"></div>
 
-        <!-- Result Section -->
-        <div v-if="info" class="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-            <div class="md:flex">
-                <!-- Thumbnail -->
-                <div class="md:w-1/3 relative group">
-                    <img :src="info.thumbnail" class="w-full h-full object-cover">
-                    <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer" @click="playVideo">
-                        <span class="text-4xl">▶</span>
+            <!-- Input Section -->
+            <article class="border">
+                <div class="padding">
+                    <h6>動画URLを入力</h6>
+                    <div class="field label border">
+                        <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
+                        <label>YouTube, ニコニコ動画, Twitter など</label>
+                    </div>
+                    <nav class="right-align">
+                        <button @click="fetchInfo" :disabled="loading || !url" class="primary">
+                            <i>{{ loading ? 'progress_activity' : 'search' }}</i>
+                            <span>{{ loading ? '取得中...' : '解析' }}</span>
+                        </button>
+                    </nav>
+                    <div v-if="error" class="small-padding">
+                        <article class="red-border round">
+                            <i>error</i>
+                            <p>{{ error }}</p>
+                        </article>
                     </div>
                 </div>
-                
-                <!-- Details -->
-                <div class="p-6 md:w-2/3 flex flex-col justify-between">
-                    <div>
-                        <h2 class="text-xl font-bold mb-2 line-clamp-2">{{ info.title }}</h2>
-                        <div class="flex gap-2 text-sm text-gray-400 mb-4">
-                            <span>{{ info.uploader }}</span>
-                            <span>•</span>
-                            <span>{{ formatDuration(info.duration) }}</span>
-                            <span>•</span>
-                            <span>{{ info.view_count?.toLocaleString() }} views</span>
+            </article>
+
+            <!-- Result Section -->
+            <article v-if="info" class="border video-info-card">
+                <div class="grid">
+                    <div class="s12 m4">
+                        <div class="thumbnail-container">
+                            <img :src="info.thumbnail" :alt="info.title">
+                            <div class="play-overlay" @click="playVideo">
+                                <i class="extra">play_circle</i>
+                            </div>
                         </div>
                     </div>
+                    <div class="s12 m8">
+                        <div class="padding">
+                            <h6 class="small">{{ info.title }}</h6>
+                            <p class="small-margin">
+                                <i>person</i>
+                                <span>{{ info.uploader || 'Unknown' }}</span>
+                            </p>
+                            <div class="row small-margin">
+                                <i>schedule</i>
+                                <span>{{ formatDuration(info.duration) }}</span>
+                                <span class="small-margin"> • </span>
+                                <i>visibility</i>
+                                <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
+                            </div>
 
-                    <!-- Actions -->
-                    <div class="space-y-4">
-                        <!-- Format Selection -->
-                        <div class="flex gap-2 items-center text-sm">
-                            <label>品質:</label>
-                            <select v-model="selectedQuality" class="bg-gray-700 rounded px-2 py-1">
-                                <option value="">最高画質 (Best)</option>
-                                <option value="1080">1080p</option>
-                                <option value="720">720p</option>
-                                <option value="480">480p</option>
-                                <option value="audio">音声のみ (Audio)</option>
-                            </select>
-                        </div>
+                            <!-- Quality Selection -->
+                            <div class="field suffix border quality-selector">
+                                <select v-model="selectedQuality">
+                                    <option value="">最高画質 (Best)</option>
+                                    <option value="1080">1080p</option>
+                                    <option value="720">720p</option>
+                                    <option value="480">480p</option>
+                                    <option value="audio">音声のみ (Audio)</option>
+                                </select>
+                                <i>high_quality</i>
+                            </div>
 
-                        <div class="flex gap-3">
-                            <button @click="download" class="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded font-bold flex items-center justify-center gap-2">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                                ダウンロード
-                            </button>
-                            <button @click="playVideo" class="flex-1 bg-purple-600 hover:bg-purple-700 py-2 rounded font-bold flex items-center justify-center gap-2">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                ストリーミング再生
-                            </button>
+                            <!-- Action Buttons -->
+                            <nav>
+                                <button @click="download" class="responsive green">
+                                    <i>download</i>
+                                    <span>ダウンロード</span>
+                                </button>
+                                <button @click="playVideo" class="responsive purple">
+                                    <i>play_arrow</i>
+                                    <span>ストリーミング再生</span>
+                                </button>
+                            </nav>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Video Player (Hidden by default) -->
-            <div v-show="showPlayer" class="border-t border-gray-700 p-4 bg-black">
-                <video ref="videoPlayer" class="video-js vjs-big-play-centered vjs-theme-city" controls preload="auto" width="100%" height="auto"></video>
-                <div class="mt-2 text-xs text-gray-500 font-mono break-all">{{ streamUrl }}</div>
+                <!-- Video Player -->
+                <div v-show="showPlayer" class="padding video-container">
+                    <video ref="videoPlayer" class="video-js vjs-big-play-centered vjs-theme-city responsive" controls preload="auto"></video>
+                    <article class="small-margin round">
+                        <p class="small">Stream URL: {{ streamUrl }}</p>
+                    </article>
+                </div>
+            </article>
+
+            <div class="space"></div>
+        </main>
+
+        <!-- Progress Indicator -->
+        <div v-if="loading" class="overlay active">
+            <div class="center-align middle-align">
+                <progress class="circle large"></progress>
             </div>
         </div>
     </div>
@@ -113,8 +178,15 @@
                     showPlayer.value = false
                     
                     try {
-                        const res = await fetch(`/info?url=${encodeURIComponent(url.value)}`)
-                        if (!res.ok) throw new Error('情報の取得に失敗しました')
+                        const res = await fetch('/info', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: url.value })
+                        })
+                        if (!res.ok) {
+                            const errorData = await res.json()
+                            throw new Error(errorData.detail || '情報の取得に失敗しました')
+                        }
                         info.value = await res.json()
                     } catch (e) {
                         error.value = e.message
@@ -133,22 +205,48 @@
                         : `${m}:${s.toString().padStart(2, '0')}`
                 }
 
-                const download = () => {
+                const download = async () => {
                     if (!info.value) return
-                    let dlUrl = `/download?url=${encodeURIComponent(url.value)}`
-                    if (selectedQuality.value === 'audio') {
-                        dlUrl += '&audio_only=true&audio_format=mp3'
-                    } else if (selectedQuality.value) {
-                        dlUrl += `&quality=${selectedQuality.value}`
+                    loading.value = true
+                    try {
+                        const payload = {
+                            url: url.value
+                        }
+                        if (selectedQuality.value === 'audio') {
+                            payload.audio_format = 'mp3'
+                        } else if (selectedQuality.value) {
+                            payload.quality = parseInt(selectedQuality.value)
+                        }
+                        
+                        const res = await fetch('/download', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        })
+                        
+                        if (!res.ok) throw new Error('ダウンロードに失敗しました')
+                        
+                        const blob = await res.blob()
+                        const downloadUrl = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = downloadUrl
+                        a.download = `${info.value.title || 'video'}.${selectedQuality.value === 'audio' ? 'mp3' : 'mp4'}`
+                        document.body.appendChild(a)
+                        a.click()
+                        window.URL.revokeObjectURL(downloadUrl)
+                        document.body.removeChild(a)
+                    } catch (e) {
+                        error.value = e.message
+                    } finally {
+                        loading.value = false
                     }
-                    window.location.href = dlUrl
                 }
 
                 const playVideo = async () => {
                     if (!info.value) return
                     showPlayer.value = true
+                    loading.value = true
                     
-                    // 1. Get Stream Manifest URL
                     try {
                         const res = await fetch('/stream', {
                             method: 'POST',
@@ -157,12 +255,10 @@
                         })
                         if (!res.ok) throw new Error('ストリームの取得に失敗しました')
                         const data = await res.json()
-                        streamUrl.value = data.url // manifest url
+                        streamUrl.value = data.url
                         
-                        // 2. Init Player
                         if (player) player.dispose()
                         
-                        // Wait for DOM
                         setTimeout(() => {
                             player = videojs(videoPlayer.value, {
                                 fluid: true,
@@ -180,7 +276,9 @@
                         }, 100)
 
                     } catch (e) {
-                        alert(e.message)
+                        error.value = e.message
+                    } finally {
+                        loading.value = false
                     }
                 }
 
