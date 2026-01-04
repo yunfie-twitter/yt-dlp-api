@@ -161,8 +161,7 @@
                 id="video-player"
                 class="video-js vjs-big-play-centered"
                 controls
-                preload="auto"
-                data-setup='{}'>
+                preload="auto">
             </video>
         </div>
         
@@ -198,6 +197,8 @@
         const statusContainer = document.getElementById('status-container');
         const videoContainer = document.getElementById('video-container');
         const infoPanel = document.getElementById('info-panel');
+        
+        let player = null;
         
         function showStatus(message, type = 'loading') {
             const spinner = type === 'loading' ? '<span class="spinner"></span>' : '';
@@ -257,8 +258,11 @@
                 // Show video container
                 videoContainer.style.display = 'block';
                 
-                // Initialize Video.js
-                const player = videojs('video-player', {
+                // Wait for next frame to ensure DOM is ready
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                
+                // Initialize Video.js with proper configuration
+                player = videojs('video-player', {
                     controls: true,
                     autoplay: false,
                     preload: 'auto',
@@ -268,25 +272,33 @@
                         vhs: {
                             overrideNative: true,
                             enableLowInitialPlaylist: true,
+                            smoothQualityChange: true,
+                            limitRenditionByPlayerDimensions: true
                         },
                         nativeAudioTracks: false,
                         nativeVideoTracks: false
                     }
                 });
                 
-                // Set source
-                player.src({
-                    src: data.url,
-                    type: 'application/x-mpegURL'
+                // Wait for player to be fully ready
+                player.ready(function() {
+                    console.log('✅ Player ready');
+                    
+                    // Set source after player is ready
+                    this.src({
+                        src: data.url,
+                        type: 'application/x-mpegURL'
+                    });
+                    
+                    hideStatus();
                 });
                 
                 // Event handlers
                 player.on('loadedmetadata', function() {
-                    hideStatus();
                     console.log('✅ Metadata loaded');
                 });
                 
-                player.on('error', function(e) {
+                player.on('error', function() {
                     const error = player.error();
                     console.error('Video.js Error:', error);
                     showStatus(`❌ 再生エラー: ${error.message} (CODE: ${error.code})`, 'error');
@@ -304,6 +316,13 @@
                 showStatus(`❌ エラー: ${error.message}`, 'error');
             }
         }
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (player) {
+                player.dispose();
+            }
+        });
         
         // Start loading when page is ready
         if (document.readyState === 'loading') {
