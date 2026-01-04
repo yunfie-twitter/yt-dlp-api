@@ -210,6 +210,49 @@ def rewrite_m3u8(body: bytes, base_url: str, proxy_base: str) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def select_best_format(formats: list) -> dict | None:
+    """Select best video format, preferring MP4 over WebM for compatibility."""
+    
+    # Filter for video formats with filesize
+    candidates = [f for f in formats if f.get('filesize') and f.get('vcodec') != 'none']
+    
+    if not candidates:
+        return None
+    
+    # Separate MP4 and WebM formats
+    mp4_formats = []
+    webm_formats = []
+    
+    for f in candidates:
+        vcodec = f.get('vcodec', '').lower()
+        ext = f.get('ext', '').lower()
+        
+        # Check if it's MP4/H.264
+        if 'avc' in vcodec or ext == 'mp4':
+            mp4_formats.append(f)
+        # Check if it's WebM/VP9
+        elif 'vp9' in vcodec or 'vp8' in vcodec or ext == 'webm':
+            webm_formats.append(f)
+        else:
+            # Unknown, treat as MP4 if extension is mp4
+            if ext == 'mp4':
+                mp4_formats.append(f)
+            else:
+                webm_formats.append(f)
+    
+    # Prefer MP4 formats for better HLS compatibility
+    if mp4_formats:
+        # Sort by bitrate (tbr) or filesize
+        return sorted(mp4_formats, key=lambda x: (x.get('tbr', 0) or 0, x.get('filesize', 0) or 0), reverse=True)[0]
+    
+    # Fallback to WebM if no MP4 available
+    if webm_formats:
+        return sorted(webm_formats, key=lambda x: (x.get('tbr', 0) or 0, x.get('filesize', 0) or 0), reverse=True)[0]
+    
+    # Last resort: highest bitrate
+    return sorted(candidates, key=lambda x: x.get('tbr', 0) or 0, reverse=True)[0]
+
+
 # --- SABR Logic ---
 
 def generate_sabr_playlist(
@@ -444,12 +487,13 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
                 is_native_m3u8 = True
 
         if not m3u8_url:
-            candidates = [f for f in formats if f.get('filesize') and f.get('vcodec') != 'none']
-            if candidates:
-                best_video = sorted(candidates, key=lambda x: x.get('tbr', 0) or 0, reverse=True)[0]
+            # Use smart format selection (prefer MP4 over WebM)
+            best_video = select_best_format(formats)
+            if best_video:
                 m3u8_url = best_video['url']
+                log_info(request, f"Selected format: {best_video.get('format_id')} - {best_video.get('ext')} ({best_video.get('vcodec')})")
             else:
-                 m3u8_url = info.get('url')
+                m3u8_url = info.get('url')
 
         if not m3u8_url:
              raise HTTPException(status_code=500, detail="No stream URL found")
@@ -520,8 +564,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             playlist_str = generate_sabr_playlist(m3u8_url, duration, filesize, base_url)
             final_content = playlist_str.encode("utf-8")
             
-            # Debug: Log first 500 chars
-            log_info(request, f"Generated SABR manifest (first 500 chars): {playlist_str[:500]}")
+            log_info(request, f"Generated SABR manifest: {duration}s, {filesize} bytes")
 
     # 4. Save to cache and return URL
     manifest_id = str(uuid.uuid4())
