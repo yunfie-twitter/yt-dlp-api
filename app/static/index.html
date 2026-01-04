@@ -9,6 +9,131 @@
     <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
+        body {
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        
+        .rail-nav {
+            width: 80px;
+            background: var(--surface-container);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem 0;
+            gap: 0.5rem;
+            border-right: 1px solid var(--outline-variant);
+        }
+        
+        .rail-nav a {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-decoration: none;
+            color: var(--on-surface);
+        }
+        
+        .rail-nav a:hover {
+            background: var(--surface-variant);
+        }
+        
+        .rail-nav a.active {
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
+        }
+        
+        .rail-nav a i {
+            font-size: 24px;
+        }
+        
+        .rail-nav a span {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        header {
+            flex-shrink: 0;
+        }
+        
+        main {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 0;
+        }
+        
+        .bottom-nav {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface-container);
+            border-top: 1px solid var(--outline-variant);
+            z-index: 100;
+        }
+        
+        .bottom-nav nav {
+            display: flex;
+            justify-content: space-around;
+            padding: 0.5rem 0;
+        }
+        
+        .bottom-nav a {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-decoration: none;
+            color: var(--on-surface);
+        }
+        
+        .bottom-nav a.active {
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
+        }
+        
+        .bottom-nav a i {
+            font-size: 24px;
+        }
+        
+        .bottom-nav a span {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .rail-nav {
+                display: none;
+            }
+            
+            .bottom-nav {
+                display: block;
+            }
+            
+            main {
+                padding-bottom: 80px;
+            }
+        }
+        
         .thumbnail-container {
             position: relative;
             overflow: hidden;
@@ -60,171 +185,183 @@
     </style>
 </head>
 <body class="dark">
-    <div id="app">
-        <header>
-            <nav>
-                <button class="circle transparent" data-ui="#drawer-left">
-                    <i>menu</i>
-                </button>
-                <h6 class="max">yt-dlp Web Client</h6>
-                <button class="circle transparent">
-                    <i>more_vert</i>
-                </button>
-            </nav>
-        </header>
-
-        <nav id="drawer-left" class="left">
-            <header>
-                <img src="https://www.beercss.com/favicon.png" class="circle">
-                <h6>yt-dlp Web</h6>
-            </header>
-            <a @click="navigateToPage('home')">
+    <div id="app" style="display: flex; width: 100%; height: 100%;">
+        <div class="rail-nav">
+            <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
                 <i>home</i>
                 <span>ホーム</span>
             </a>
-            <a @click="navigateToPage('history')">
+            <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
                 <i>history</i>
-                <span>ダウンロード履歴</span>
+                <span>履歴</span>
             </a>
-            <div class="divider"></div>
+            <div style="flex: 1;"></div>
             <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
                 <i>code</i>
-                <span>GitHub リポジトリ</span>
+                <span>GitHub</span>
             </a>
-            <div class="divider"></div>
-            <label class="row">
-                <span>ダークモード</span>
-                <label class="switch">
-                    <input type="checkbox" checked @change="toggleTheme">
-                    <span></span>
-                </label>
-            </label>
-        </nav>
+            <a @click="toggleThemeManual">
+                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                <span>テーマ</span>
+            </a>
+        </div>
 
-        <main class="responsive">
-            <div class="space"></div>
+        <div class="main-container">
+            <header>
+                <nav>
+                    <h6 class="max">yt-dlp Web Client</h6>
+                    <button class="circle transparent">
+                        <i>more_vert</i>
+                    </button>
+                </nav>
+            </header>
 
-            <div v-if="currentPage === 'home'">
-                <article class="border">
-                    <div class="padding">
-                        <h6>動画URLを入力</h6>
-                        <div class="field label border">
-                            <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
-                            <label>YouTube, ニコニコ動画, Twitter など</label>
-                        </div>
-                        <nav class="right-align">
-                            <button @click="pasteFromClipboard" :disabled="loading" class="primary">
-                                <i>content_paste</i>
-                                <span>貼り付け</span>
-                            </button>
-                            <button @click="fetchInfo" :disabled="loading || !url" class="primary">
-                                <i>search</i>
-                                <span>解析</span>
-                                <progress v-if="loading" class="circle small download-progress"></progress>
-                            </button>
-                        </nav>
-                        <div v-if="error" class="small-padding">
-                            <article class="red-border round">
-                                <i>error</i>
-                                <p>{{ error }}</p>
-                            </article>
-                        </div>
-                    </div>
-                </article>
+            <main class="responsive">
+                <div class="space"></div>
 
-                <article v-if="info" class="border video-info-card">
-                    <div class="grid">
-                        <div class="s12 m4">
-                            <div class="thumbnail-container">
-                                <img :src="info.thumbnail" :alt="info.title">
-                            </div>
-                        </div>
-                        <div class="s12 m8">
-                            <div class="padding">
-                                <h6 class="small">{{ info.title }}</h6>
-                                <p class="small-margin">
-                                    <i>person</i>
-                                    <span>{{ info.uploader || 'Unknown' }}</span>
-                                </p>
-                                <div class="row small-margin">
-                                    <i>schedule</i>
-                                    <span>{{ formatDuration(info.duration) }}</span>
-                                    <span class="small-margin"> • </span>
-                                    <i>visibility</i>
-                                    <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
-                                </div>
-
-                                <div class="field suffix border quality-selector">
-                                    <select v-model="selectedQuality">
-                                        <option value="">最高画質 (Best)</option>
-                                        <option value="1080">1080p</option>
-                                        <option value="720">720p</option>
-                                        <option value="480">480p</option>
-                                        <option value="audio">音声のみ (Audio)</option>
-                                    </select>
-                                    <i>high_quality</i>
-                                </div>
-
-                                <nav>
-                                    <button @click="download" :disabled="downloading" class="responsive primary">
-                                        <i>download</i>
-                                        <span>ダウンロード</span>
-                                        <progress v-if="downloading" class="circle small download-progress"></progress>
-                                    </button>
-                                </nav>
-                            </div>
-                        </div>
-                    </div>
-                </article>
-            </div>
-
-            <div v-if="currentPage === 'history'">
-                <article class="border">
-                    <div class="padding">
-                        <div class="row">
-                            <h5 class="max">ダウンロード履歴</h5>
-                            <button @click="confirmClearHistory" class="primary" :disabled="history.length === 0">
-                                <i>delete_sweep</i>
-                                <span>クリア</span>
-                            </button>
-                        </div>
-                    </div>
-                </article>
-
-                <div v-if="history.length === 0" class="padding">
-                    <article class="border center-align">
+                <div v-if="currentPage === 'home'">
+                    <article class="border">
                         <div class="padding">
-                            <i class="extra">history</i>
-                            <p>履歴がありません</p>
-                            <button @click="navigateToPage('home')" class="primary">
-                                <i>home</i>
-                                <span>ホームに戻る</span>
-                            </button>
+                            <h6>動画URLを入力</h6>
+                            <div class="field label border">
+                                <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
+                                <label>YouTube, ニコニコ動画, Twitter など</label>
+                            </div>
+                            <nav class="right-align">
+                                <button @click="pasteFromClipboard" :disabled="loading" class="primary">
+                                    <i>content_paste</i>
+                                    <span>貼り付け</span>
+                                </button>
+                                <button @click="fetchInfo" :disabled="loading || !url" class="primary">
+                                    <i>search</i>
+                                    <span>解析</span>
+                                    <progress v-if="loading" class="circle small download-progress"></progress>
+                                </button>
+                            </nav>
+                            <div v-if="error" class="small-padding">
+                                <article class="red-border round">
+                                    <i>error</i>
+                                    <p>{{ error }}</p>
+                                </article>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article v-if="info" class="border video-info-card">
+                        <div class="grid">
+                            <div class="s12 m4">
+                                <div class="thumbnail-container">
+                                    <img :src="info.thumbnail" :alt="info.title">
+                                </div>
+                            </div>
+                            <div class="s12 m8">
+                                <div class="padding">
+                                    <h6 class="small">{{ info.title }}</h6>
+                                    <p class="small-margin">
+                                        <i>person</i>
+                                        <span>{{ info.uploader || 'Unknown' }}</span>
+                                    </p>
+                                    <div class="row small-margin">
+                                        <i>schedule</i>
+                                        <span>{{ formatDuration(info.duration) }}</span>
+                                        <span class="small-margin"> • </span>
+                                        <i>visibility</i>
+                                        <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
+                                    </div>
+
+                                    <div class="field suffix border quality-selector">
+                                        <select v-model="selectedQuality">
+                                            <option value="">最高画質 (Best)</option>
+                                            <option value="1080">1080p</option>
+                                            <option value="720">720p</option>
+                                            <option value="480">480p</option>
+                                            <option value="audio">音声のみ (Audio)</option>
+                                        </select>
+                                        <i>high_quality</i>
+                                    </div>
+
+                                    <nav>
+                                        <button @click="download" :disabled="downloading" class="responsive primary">
+                                            <i>download</i>
+                                            <span>ダウンロード</span>
+                                            <progress v-if="downloading" class="circle small download-progress"></progress>
+                                        </button>
+                                    </nav>
+                                </div>
+                            </div>
                         </div>
                     </article>
                 </div>
 
-                <article v-else v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
-                    <div class="row padding">
-                        <img :src="item.thumbnail" class="history-thumbnail" :alt="item.title">
-                        <div class="max">
-                            <p class="bold">{{ item.title }}</p>
-                            <p class="small">
-                                <i>person</i>
-                                {{ item.uploader }}
-                            </p>
-                            <p class="small">
-                                <i>schedule</i>
-                                {{ new Date(item.timestamp).toLocaleString('ja-JP') }}
-                            </p>
+                <div v-if="currentPage === 'history'">
+                    <article class="border">
+                        <div class="padding">
+                            <div class="row">
+                                <h5 class="max">ダウンロード履歴</h5>
+                                <button @click="confirmClearHistory" class="primary" :disabled="history.length === 0">
+                                    <i>delete_sweep</i>
+                                    <span>クリア</span>
+                                </button>
+                            </div>
                         </div>
-                        <i>download</i>
-                    </div>
-                </article>
-            </div>
+                    </article>
 
-            <div class="space"></div>
-        </main>
+                    <div v-if="history.length === 0" class="padding">
+                        <article class="border center-align">
+                            <div class="padding">
+                                <i class="extra">history</i>
+                                <p>履歴がありません</p>
+                                <button @click="navigateToPage('home')" class="primary">
+                                    <i>home</i>
+                                    <span>ホームに戻る</span>
+                                </button>
+                            </div>
+                        </article>
+                    </div>
+
+                    <article v-else v-for="(item, index) in history" :key="index" class="border history-item" @click="loadFromHistory(item)">
+                        <div class="row padding">
+                            <img :src="item.thumbnail" class="history-thumbnail" :alt="item.title">
+                            <div class="max">
+                                <p class="bold">{{ item.title }}</p>
+                                <p class="small">
+                                    <i>person</i>
+                                    {{ item.uploader }}
+                                </p>
+                                <p class="small">
+                                    <i>schedule</i>
+                                    {{ new Date(item.timestamp).toLocaleString('ja-JP') }}
+                                </p>
+                            </div>
+                            <i>download</i>
+                        </div>
+                    </article>
+                </div>
+
+                <div class="space"></div>
+            </main>
+        </div>
+
+        <div class="bottom-nav">
+            <nav>
+                <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
+                    <i>home</i>
+                    <span>ホーム</span>
+                </a>
+                <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
+                    <i>history</i>
+                    <span>履歴</span>
+                </a>
+                <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
+                    <i>code</i>
+                    <span>GitHub</span>
+                </a>
+                <a @click="toggleThemeManual">
+                    <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                    <span>テーマ</span>
+                </a>
+            </nav>
+        </div>
 
         <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
 
@@ -252,6 +389,7 @@
                 const currentPage = ref('home')
                 const showDeleteModal = ref(false)
                 const history = ref([])
+                const isDarkMode = ref(true)
 
                 const setCookie = (name, value, days = 365) => {
                     const expires = new Date()
@@ -270,13 +408,6 @@
                         }
                     }
                     return null
-                }
-
-                const closeDrawer = () => {
-                    const drawer = document.querySelector('#drawer-left')
-                    if (drawer && drawer.classList.contains('active')) {
-                        drawer.classList.remove('active')
-                    }
                 }
 
                 const loadHistory = () => {
@@ -314,17 +445,16 @@
                 const loadFromHistory = (item) => {
                     url.value = item.url
                     currentPage.value = 'home'
-                    closeDrawer()
                     fetchInfo()
                 }
 
                 const navigateToPage = (page) => {
                     currentPage.value = page
-                    closeDrawer()
                 }
 
-                const toggleTheme = (event) => {
-                    if (event.target.checked) {
+                const toggleThemeManual = () => {
+                    isDarkMode.value = !isDarkMode.value
+                    if (isDarkMode.value) {
                         document.body.classList.add('dark')
                         document.body.classList.remove('light')
                     } else {
@@ -421,9 +551,9 @@
 
                 return {
                     url, info, loading, downloading, error, selectedQuality,
-                    currentPage, showDeleteModal, history,
+                    currentPage, showDeleteModal, history, isDarkMode,
                     fetchInfo, formatDuration, download, navigateToPage,
-                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, toggleTheme
+                    pasteFromClipboard, confirmClearHistory, clearHistory, loadFromHistory, toggleThemeManual
                 }
             }
         }).mount('#app')
