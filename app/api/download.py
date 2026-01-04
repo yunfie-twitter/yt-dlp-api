@@ -3,11 +3,12 @@ import os
 import time
 import uuid
 import aiofiles
+import json
 from typing import AsyncIterator, Optional, Dict
 from collections import deque
 from contextlib import suppress
 from urllib.parse import quote
-from fastapi import APIRouter, Request, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.models.request import VideoRequest
 from app.models.internal import DownloadIntent
@@ -35,16 +36,17 @@ router = APIRouter()
 
 # Global dictionary to track download progress
 download_tasks: Dict[str, dict] = {}
+# WebSocket connections per task
+websocket_connections: Dict[str, list] = {}
 
 class DownloadService:
     """Video download service"""
     
     @staticmethod
-    async def download(intent: DownloadIntent, locale: str, request: Request, task_id: Optional[str] = None) -> tuple[AsyncIterator[bytes], dict, Optional[int]]:
+    async def download_with_progress(intent: DownloadIntent, locale: str, request: Request, task_id: str) -> tuple[str, str, int]:
         """
-        Download to temp file then stream.
-        Reliable for merges/conversions.
-        Returns (generator, headers, content_length)
+        Download to temp file with WebSocket progress updates.
+        Returns (file_path, filename, file_size)
         """
         _ = functools.partial(i18n.get, locale=locale)
         safe_url = safe_url_for_log(intent.url)
@@ -59,6 +61,12 @@ class DownloadService:
             format_str = FormatDecision.decide(intent)
             
         log_info(request, f"Format decided: {format_str} for {safe_url}")
+        
+        await DownloadService.broadcast_progress(task_id, {
+            'status': 'fetching_info',
+            'progress': 0,
+            'message': '動画情報を取得中...'
+        })
         
         # 2. Get Filename (metadata)
         filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
@@ -86,7 +94,7 @@ class DownloadService:
         temp_id = str(uuid.uuid4())
         temp_path_template = os.path.join(TEMP_DIR, f"{temp_id}.%(ext)s")
         
-        # 4. Build Download Command (Output to file)
+        # 4. Build Download Command
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
@@ -94,22 +102,27 @@ class DownloadService:
             intent.file_format
         )
         
-        # Replace '-o -' with file output and add progress flag
         try:
             o_index = cmd.index('-o')
             cmd[o_index+1] = temp_path_template
         except ValueError:
             cmd.extend(['-o', temp_path_template])
         
-        # Remove --no-progress if exists and add --newline for progress tracking
+        # Add progress flags
         cmd = [c for c in cmd if c != '--no-progress']
         cmd.extend(['--newline', '--progress'])
         
         log_info(request, f"Starting download to temp: {temp_path_template}")
         
-        if task_id:
-            download_tasks[task_id]['status'] = 'downloading'
-            download_tasks[task_id]['filename'] = filename
+        download_tasks[task_id]['status'] = 'downloading'
+        download_tasks[task_id]['filename'] = filename
+        
+        await DownloadService.broadcast_progress(task_id, {
+            'status': 'downloading',
+            'progress': 0,
+            'filename': filename,
+            'message': 'ダウンロード中...'
+        })
         
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -121,7 +134,7 @@ class DownloadService:
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
         async def parse_progress():
-            """Parse yt-dlp progress from stdout"""
+            """Parse yt-dlp progress and broadcast via WebSocket"""
             try:
                 while True:
                     line = await process.stdout.readline()
@@ -129,25 +142,40 @@ class DownloadService:
                         break
                     decoded = line.decode().strip()
                     
-                    # Parse progress line: [download]  45.2% of 10.50MiB at 2.30MiB/s ETA 00:03
-                    if task_id and '[download]' in decoded:
+                    # Parse: [download]  45.2% of 10.50MiB at 2.30MiB/s ETA 00:03
+                    if '[download]' in decoded:
+                        progress_data = {'status': 'downloading'}
+                        
                         # Extract percentage
                         percent_match = re.search(r'(\d+\.\d+)%', decoded)
                         if percent_match:
                             percentage = float(percent_match.group(1))
+                            progress_data['progress'] = percentage
                             download_tasks[task_id]['progress'] = percentage
+                        
+                        # Extract size
+                        size_match = re.search(r'of\s+([\d.]+[KMG]iB)', decoded)
+                        if size_match:
+                            progress_data['total_size'] = size_match.group(1)
                         
                         # Extract speed
                         speed_match = re.search(r'at\s+([\d.]+[KMG]iB/s)', decoded)
                         if speed_match:
-                            download_tasks[task_id]['speed'] = speed_match.group(1)
+                            speed = speed_match.group(1)
+                            progress_data['speed'] = speed
+                            download_tasks[task_id]['speed'] = speed
                         
                         # Extract ETA
                         eta_match = re.search(r'ETA\s+(\d{2}:\d{2})', decoded)
                         if eta_match:
-                            download_tasks[task_id]['eta'] = eta_match.group(1)
-            except:
-                pass
+                            eta = eta_match.group(1)
+                            progress_data['eta'] = eta
+                            download_tasks[task_id]['eta'] = eta
+                        
+                        # Broadcast progress
+                        await DownloadService.broadcast_progress(task_id, progress_data)
+            except Exception as e:
+                log_error(request, f"Progress parsing error: {str(e)}")
         
         async def drain_stderr():
             try:
@@ -164,29 +192,35 @@ class DownloadService:
         progress_task = asyncio.create_task(parse_progress())
         stderr_task = asyncio.create_task(drain_stderr())
         
-        # Wait for completion
         try:
             returncode = await process.wait()
             
             if returncode != 0:
                 error_summary = '\n'.join(stderr_lines)
-                if task_id:
-                    download_tasks[task_id]['status'] = 'error'
-                    download_tasks[task_id]['error'] = error_summary[:200]
+                download_tasks[task_id]['status'] = 'error'
+                download_tasks[task_id]['error'] = error_summary[:200]
+                await DownloadService.broadcast_progress(task_id, {
+                    'status': 'error',
+                    'error': error_summary[:200]
+                })
                 raise Exception(f"yt-dlp failed: {error_summary[:200]}")
             
-            if task_id:
-                download_tasks[task_id]['progress'] = 100.0
-                download_tasks[task_id]['status'] = 'completed'
+            download_tasks[task_id]['progress'] = 100.0
+            download_tasks[task_id]['status'] = 'completed'
+            
+            await DownloadService.broadcast_progress(task_id, {
+                'status': 'completed',
+                'progress': 100,
+                'message': 'ダウンロード完了！'
+            })
                 
         except Exception as e:
             log_error(request, f"Process error: {str(e)}")
-            if task_id:
-                download_tasks[task_id]['status'] = 'error'
-                download_tasks[task_id]['error'] = str(e)
+            download_tasks[task_id]['status'] = 'error'
+            download_tasks[task_id]['error'] = str(e)
             process.kill()
             await process.wait()
-            raise HTTPException(status_code=500, detail=str(e))
+            raise
         finally:
              progress_task.cancel()
              stderr_task.cancel()
@@ -202,88 +236,38 @@ class DownloadService:
         final_temp_path = os.path.join(TEMP_DIR, found_files[0])
         file_size = os.path.getsize(final_temp_path)
         
-        if task_id:
-            download_tasks[task_id]['file_path'] = final_temp_path
-            download_tasks[task_id]['file_size'] = file_size
+        download_tasks[task_id]['file_path'] = final_temp_path
+        download_tasks[task_id]['file_size'] = file_size
         
-        log_info(request, f"Download finished. Streaming {file_size / 1024 / 1024:.1f} MB")
-
-        # 6. Stream Generator
-        async def generate():
+        log_info(request, f"Download finished: {file_size / 1024 / 1024:.1f} MB")
+        
+        return final_temp_path, filename, file_size
+    
+    @staticmethod
+    async def broadcast_progress(task_id: str, data: dict):
+        """Broadcast progress to all connected WebSocket clients"""
+        if task_id not in websocket_connections:
+            return
+        
+        # Add task_id to data
+        data['task_id'] = task_id
+        message = json.dumps(data)
+        
+        # Send to all connected clients
+        disconnected = []
+        for ws in websocket_connections[task_id]:
             try:
-                async with aiofiles.open(final_temp_path, 'rb') as f:
-                    while True:
-                        chunk = await f.read(CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        yield chunk
-            except Exception as e:
-                log_error(request, f"Streaming error: {str(e)}")
-            finally:
-                # Cleanup
-                with suppress(OSError):
-                    os.remove(final_temp_path)
-                log_info(request, f"Cleaned up {final_temp_path}")
-                if task_id and task_id in download_tasks:
-                    del download_tasks[task_id]
+                await ws.send_text(message)
+            except:
+                disconnected.append(ws)
+        
+        # Remove disconnected clients
+        for ws in disconnected:
+            websocket_connections[task_id].remove(ws)
 
-        encoded_filename = quote(filename)
-        headers = {
-            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
-            'X-Content-Type-Options': 'nosniff',
-            'Cache-Control': 'no-cache',
-            'Accept-Ranges': 'bytes',
-            'Content-Length': str(file_size)
-        }
-        
-        return generate(), headers, file_size
-
-@router.post("/download", dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
-async def download_video(request: Request, video_request: VideoRequest):
-    """Download video directly (synchronous)"""
-    
-    locale = get_locale(request.headers.get("accept-language"))
-    _ = functools.partial(i18n.get, locale=locale)
-    
-    validation_result = await SecurityValidator.validate_url(str(video_request.url))
-    if validation_result == UrlValidationResult.BLOCKED:
-        await release_download_slot(request)
-        raise HTTPException(status_code=403, detail=_("error.private_ip"))
-    if validation_result == UrlValidationResult.INVALID:
-        await release_download_slot(request)
-        raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
-    
-    intent = video_request.to_intent()
-    safe_url = safe_url_for_log(intent.url)
-    log_info(request, _("log.starting_stream", url=safe_url, format="download_temp_file"))
-    
-    try:
-        generator, headers, content_length = await DownloadService.download(intent, locale, request)
-        
-        async def wrapped_generator():
-            try:
-                async for chunk in generator:
-                    yield chunk
-            finally:
-                await release_download_slot(request)
-        
-        return StreamingResponse(
-            wrapped_generator(),
-            media_type=headers.get('Content-Type', 'application/octet-stream'),
-            headers=headers
-        )
-        
-    except HTTPException:
-        await release_download_slot(request)
-        raise
-    except Exception as e:
-        await release_download_slot(request)
-        log_error(request, f"Download error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/download/async", dependencies=[Depends(rate_limiter)])
-async def download_video_async(request: Request, video_request: VideoRequest, background_tasks: BackgroundTasks):
-    """Start async download and return task ID"""
+@router.post("/download/start", dependencies=[Depends(rate_limiter)])
+async def start_download(request: Request, video_request: VideoRequest, background_tasks: BackgroundTasks):
+    """Start download task and return task ID for progress tracking"""
     
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
@@ -314,9 +298,9 @@ async def download_video_async(request: Request, video_request: VideoRequest, ba
     async def background_download():
         try:
             intent = video_request.to_intent()
-            await DownloadService.download(intent, locale, request, task_id=task_id)
+            await DownloadService.download_with_progress(intent, locale, request, task_id)
         except Exception as e:
-            log_error(request, f"Async download error: {str(e)}")
+            log_error(request, f"Download error: {str(e)}")
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'error'
                 download_tasks[task_id]['error'] = str(e)
@@ -329,36 +313,49 @@ async def download_video_async(request: Request, video_request: VideoRequest, ba
         'message': 'Download task created'
     })
 
-@router.get("/download/progress/{task_id}")
-async def get_download_progress(task_id: str):
-    """Get download progress for a task"""
+@router.websocket("/download/progress/ws/{task_id}")
+async def websocket_progress(websocket: WebSocket, task_id: str):
+    """WebSocket endpoint for real-time progress updates"""
+    await websocket.accept()
     
-    if task_id not in download_tasks:
-        raise HTTPException(status_code=404, detail="Task not found")
+    # Register WebSocket connection
+    if task_id not in websocket_connections:
+        websocket_connections[task_id] = []
+    websocket_connections[task_id].append(websocket)
     
-    task_info = download_tasks[task_id]
-    
-    response = {
-        'task_id': task_id,
-        'status': task_info['status'],
-        'progress': task_info['progress'],
-        'filename': task_info['filename']
-    }
-    
-    if task_info['speed']:
-        response['speed'] = task_info['speed']
-    if task_info['eta']:
-        response['eta'] = task_info['eta']
-    if task_info['file_size']:
-        response['file_size'] = task_info['file_size']
-    if task_info['error']:
-        response['error'] = task_info['error']
-    
-    return JSONResponse(response)
+    try:
+        # Send initial state if task exists
+        if task_id in download_tasks:
+            task_info = download_tasks[task_id]
+            await websocket.send_text(json.dumps({
+                'task_id': task_id,
+                'status': task_info['status'],
+                'progress': task_info['progress'],
+                'filename': task_info['filename']
+            }))
+        
+        # Keep connection alive
+        while True:
+            try:
+                # Receive ping/pong to keep connection alive
+                data = await websocket.receive_text()
+                if data == 'ping':
+                    await websocket.send_text('pong')
+            except WebSocketDisconnect:
+                break
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        # Unregister connection
+        if task_id in websocket_connections:
+            if websocket in websocket_connections[task_id]:
+                websocket_connections[task_id].remove(websocket)
+            if not websocket_connections[task_id]:
+                del websocket_connections[task_id]
 
 @router.get("/download/file/{task_id}")
-async def get_download_file(task_id: str):
-    """Download the completed file"""
+async def download_file(task_id: str):
+    """Download the completed file (browser native download)"""
     
     if task_id not in download_tasks:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -366,7 +363,7 @@ async def get_download_file(task_id: str):
     task_info = download_tasks[task_id]
     
     if task_info['status'] != 'completed':
-        raise HTTPException(status_code=400, detail=f"Download not completed. Current status: {task_info['status']}")
+        raise HTTPException(status_code=400, detail=f"Download not completed. Status: {task_info['status']}")
     
     file_path = task_info['file_path']
     if not file_path or not os.path.exists(file_path):
@@ -404,3 +401,66 @@ async def get_download_file(task_id: str):
         media_type='application/octet-stream',
         headers=headers
     )
+
+# Keep original /download endpoint for backward compatibility
+@router.post("/download", dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
+async def download_video_legacy(request: Request, video_request: VideoRequest):
+    """Legacy direct download (immediate streaming)"""
+    
+    locale = get_locale(request.headers.get("accept-language"))
+    _ = functools.partial(i18n.get, locale=locale)
+    
+    validation_result = await SecurityValidator.validate_url(str(video_request.url))
+    if validation_result == UrlValidationResult.BLOCKED:
+        await release_download_slot(request)
+        raise HTTPException(status_code=403, detail=_("error.private_ip"))
+    if validation_result == UrlValidationResult.INVALID:
+        await release_download_slot(request)
+        raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
+    
+    # Use new progress-enabled download
+    task_id = str(uuid.uuid4())
+    download_tasks[task_id] = {
+        'status': 'downloading',
+        'progress': 0.0,
+        'created_at': time.time()
+    }
+    
+    try:
+        intent = video_request.to_intent()
+        file_path, filename, file_size = await DownloadService.download_with_progress(intent, locale, request, task_id)
+        
+        async def generate():
+            try:
+                async with aiofiles.open(file_path, 'rb') as f:
+                    while True:
+                        chunk = await f.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                with suppress(OSError):
+                    os.remove(file_path)
+                if task_id in download_tasks:
+                    del download_tasks[task_id]
+                await release_download_slot(request)
+        
+        encoded_filename = quote(filename)
+        headers = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-cache',
+            'Content-Length': str(file_size)
+        }
+        
+        return StreamingResponse(
+            generate(),
+            media_type='application/octet-stream',
+            headers=headers
+        )
+        
+    except Exception as e:
+        await release_download_slot(request)
+        if task_id in download_tasks:
+            del download_tasks[task_id]
+        raise HTTPException(status_code=500, detail=str(e))
