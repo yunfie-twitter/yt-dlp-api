@@ -76,6 +76,49 @@
             overflow-y: auto;
             padding-bottom: 0;
         }
+
+        footer {
+            flex-shrink: 0;
+            border-top: 1px solid var(--outline-variant);
+            background: var(--surface-container);
+        }
+
+        footer nav {
+            padding: 0.75rem 1rem;
+        }
+
+        footer .progress-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 1;
+        }
+
+        footer .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: var(--surface-variant);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        footer .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
+
+        footer .progress-text {
+            font-size: 12px;
+            color: var(--on-surface-variant);
+        }
+
+        footer .progress-stats {
+            font-size: 11px;
+            color: var(--on-surface-variant);
+            display: flex;
+            gap: 0.5rem;
+        }
         
         .bottom-nav {
             display: none;
@@ -132,6 +175,10 @@
             main {
                 padding-bottom: 80px;
             }
+
+            footer {
+                margin-bottom: 64px;
+            }
         }
         
         .thumbnail-container {
@@ -153,22 +200,6 @@
         .download-progress {
             display: inline-block;
             margin-left: 0.5rem;
-        }
-        .progress-card {
-            margin-top: 1rem;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: var(--surface-variant);
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 0.5rem 0;
-        }
-        .progress-bar-fill {
-            height: 100%;
-            background: var(--primary);
-            transition: width 0.3s;
         }
         .history-item {
             cursor: pointer;
@@ -336,34 +367,6 @@
                             </div>
                         </div>
                     </article>
-
-                    <!-- Progress Card -->
-                    <article v-if="downloadProgress" class="border progress-card">
-                        <div class="padding">
-                            <div class="row">
-                                <div class="max">
-                                    <h6>ダウンロード中</h6>
-                                    <p class="small">{{ downloadProgress.filename || '処理中...' }}</p>
-                                </div>
-                                <i v-if="downloadProgress.status === 'completed'" class="green-text">check_circle</i>
-                                <progress v-else-if="downloadProgress.status === 'downloading'" class="circle"></progress>
-                            </div>
-                            
-                            <div class="progress-bar">
-                                <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
-                            </div>
-                            
-                            <div class="row small">
-                                <span class="max">{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
-                                <span v-if="downloadProgress.speed">{{ downloadProgress.speed }}</span>
-                                <span v-if="downloadProgress.eta" class="small-margin">ETA {{ downloadProgress.eta }}</span>
-                            </div>
-                            
-                            <p v-if="downloadProgress.message" class="small center-align">
-                                {{ downloadProgress.message }}
-                            </p>
-                        </div>
-                    </article>
                 </div>
 
                 <div v-if="currentPage === 'history'">
@@ -413,6 +416,38 @@
 
                 <div class="space"></div>
             </main>
+
+            <!-- Download Progress Footer -->
+            <footer v-if="downloadProgress">
+                <nav>
+                    <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
+                        <i class="green-text">check_circle</i>
+                    </button>
+                    <button class="circle transparent" v-else-if="downloadProgress.status === 'downloading'">
+                        <progress class="circle small"></progress>
+                    </button>
+                    <button class="circle transparent" v-else>
+                        <i>downloading</i>
+                    </button>
+                    
+                    <div class="progress-info">
+                        <div class="progress-text">
+                            <strong>{{ downloadProgress.filename || '処理中...' }}</strong>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
+                            <span v-if="downloadProgress.speed">• {{ downloadProgress.speed }}</span>
+                            <span v-if="downloadProgress.eta">• ETA {{ downloadProgress.eta }}</span>
+                            <span v-if="downloadProgress.message">• {{ downloadProgress.message }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="max"></div>
+                </nav>
+            </footer>
         </div>
 
         <div class="bottom-nav">
