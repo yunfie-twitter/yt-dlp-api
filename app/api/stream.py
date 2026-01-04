@@ -90,7 +90,8 @@ def fingerprint_headers(target_url: str, request: Request | None, stage: int = 0
     return h
 
 
-client = httpx.AsyncClient(follow_redirects=True, timeout=30.0)
+# Reduced timeout for faster response
+client = httpx.AsyncClient(follow_redirects=True, timeout=10.0)
 
 
 @router.on_event("shutdown")
@@ -101,7 +102,7 @@ async def shutdown_event():
 async def fetch_with_retry(
     url: str,
     request: Request | None,
-    max_retry: int = 4,
+    max_retry: int = 2,  # Reduced from 4 to 2
     method: str = "GET",
     headers: dict | None = None
 ) -> httpx.Response | None:
@@ -155,6 +156,7 @@ def extract_segments(m3u8_body: bytes, base_url: str, limit: int = 3) -> list[st
 
 
 async def prefetch_segments(urls: list[str]):
+    """Background prefetch - does not block response."""
     for u in urls:
         try:
             req = client.build_request(
@@ -225,7 +227,6 @@ def generate_sabr_playlist(
     bytes_per_segment = int(avg_bytes_per_sec * SABR_SEGMENT_DURATION)
     
     encoded_url = quote(url, safe="")
-    # Fixed: Use absolute path /stream/segment instead of relative path
     segment_base = f"{base_url}/stream/segment?url={encoded_url}&bps={bytes_per_segment}&total={filesize}"
 
     lines = [
@@ -294,9 +295,6 @@ async def sabr_segment(
     end_byte = start_byte + bps - 1
     
     if start_byte >= total:
-        # End of stream is not 404 in HLS usually, but for range it is
-        # However, if we are just slightly over, we should clamp or empty
-        # If seq is way off, 404.
         raise HTTPException(status_code=404, detail="Segment out of range")
         
     if end_byte >= total:
@@ -307,7 +305,7 @@ async def sabr_segment(
     r = await fetch_with_retry(
         target_url, 
         request, 
-        max_retry=3, 
+        max_retry=2,
         headers={"Range": range_header}
     )
     
@@ -371,14 +369,19 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
         m3u8_url = None
         formats = info.get('formats', [])
         best_video = None
+        is_native_m3u8 = False
         
+        # Check if format is native m3u8
         for f in formats:
             if 'm3u8' in f.get('protocol', '') or f.get('ext') == 'm3u8':
                 m3u8_url = f.get('url')
+                is_native_m3u8 = True
                 break
         
         if not m3u8_url:
             m3u8_url = info.get('manifest_url')
+            if m3u8_url and '.m3u8' in m3u8_url:
+                is_native_m3u8 = True
 
         if not m3u8_url:
             candidates = [f for f in formats if f.get('filesize') and f.get('vcodec') != 'none']
@@ -399,33 +402,39 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
     proxy_endpoint = f"{base_url}/proxy"
     
     final_content = b""
-
-    # 2. Try to fetch as m3u8
     use_sabr = False
-    try:
-        r = await fetch_with_retry(m3u8_url, request)
-        if not r or r.status_code != 200:
-             if r: await r.aclose()
-             use_sabr = True
-        else:
-            body = await r.aread()
-            await r.aclose()
-            
-            ct = r.headers.get("content-type", "").lower()
-            if "mpegurl" in ct or body[:7] == b"#EXTM3U":
-                 new_content = rewrite_m3u8(body, m3u8_url, proxy_endpoint)
-                 segments = extract_segments(body, m3u8_url, limit=3)
-                 if segments:
-                     asyncio.create_task(prefetch_segments(segments))
-                 final_content = new_content
+
+    # 2. Only fetch m3u8 if it's explicitly a native m3u8 stream
+    if is_native_m3u8:
+        try:
+            r = await fetch_with_retry(m3u8_url, request, max_retry=2)
+            if r and r.status_code == 200:
+                body = await r.aread()
+                await r.aclose()
+                
+                ct = r.headers.get("content-type", "").lower()
+                if "mpegurl" in ct or body[:7] == b"#EXTM3U":
+                    new_content = rewrite_m3u8(body, m3u8_url, proxy_endpoint)
+                    segments = extract_segments(body, m3u8_url, limit=3)
+                    if segments:
+                        # Fire and forget - don't await
+                        asyncio.create_task(prefetch_segments(segments))
+                    final_content = new_content
+                else:
+                    use_sabr = True
             else:
+                if r:
+                    await r.aclose()
                 use_sabr = True
-    except Exception:
+        except Exception:
+            use_sabr = True
+    else:
+        # Skip m3u8 fetch for non-native streams to save time
         use_sabr = True
 
     # 3. SABR Fallback
     if use_sabr:
-        log_info(request, f"Fallback to SABR for {m3u8_url}")
+        log_info(request, f"Using SABR for {m3u8_url}")
         
         duration = info.get('duration', 0)
         if best_video:
@@ -434,6 +443,7 @@ async def get_stream_playlist(request: Request, video_request: InfoRequest):
             filesize = info.get('filesize') or info.get('filesize_approx') or 0
             
         if filesize == 0:
+            # Last resort: direct proxy
             encoded_url = quote(m3u8_url, safe="")
             proxy_url = f"{proxy_endpoint}?url={encoded_url}"
             final_content = (
@@ -530,7 +540,7 @@ async def proxy(request: Request, url: str = Query(...)):
             headers=headers,
         )
 
-    r = await fetch_with_retry(normalized, request)
+    r = await fetch_with_retry(normalized, request, max_retry=2)
     
     if not r:
         raise HTTPException(status_code=502, detail="Proxy failed")
