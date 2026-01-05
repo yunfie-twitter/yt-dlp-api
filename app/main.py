@@ -40,10 +40,12 @@ if web_clients_path.exists():
     app.mount("/web/clients", StaticFiles(directory="web/clients", html=True), name="web_clients")
     print(f"Mounted /web/clients from {web_clients_path.absolute()}")
 
-@app.get("/web", tags=["Web Client"])
-async def web_client():
-    """Serve the web client interface."""
-    return FileResponse("app/static/index.html")
+# /web 以下で app/static を公開
+app.mount(
+    "/web",
+    StaticFiles(directory="app/static", html=True),
+    name="web"
+)
 
 @app.on_event("startup")
 async def startup_event():
