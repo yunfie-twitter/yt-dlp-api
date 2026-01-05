@@ -555,3 +555,113 @@ a:hover {
         margin-bottom: 64px;
     }
 }
+@media (max-width: 768px) {
+    body {
+        flex-direction: column;
+        height: auto;
+    }
+}
+@media (max-width: 768px) {
+    header {
+        padding: 0.5rem 1rem;
+    }
+
+    main {
+        padding: 0.5rem 1rem 80px; /* 下部余白確保 */
+    }
+}
+@media (max-width: 768px) {
+    .history-thumbnail {
+        width: 80px;
+        height: 60px;
+    }
+
+    .thumbnail-container {
+        border-radius: 8px;
+    }
+}
+@media (max-width: 768px) {
+    .rail-nav a span,
+    .bottom-nav a span,
+    footer .progress-text,
+    footer .progress-stats {
+        font-size: 10px;
+    }
+}
+@media (max-width: 768px) {
+    dialog {
+        width: 90%;
+        max-width: 320px;
+    }
+}
+@media (max-width: 768px) {
+    .video-info-card,
+    .settings-item {
+        padding: 1rem;
+    }
+}
+/* Tablet Layout */
+@media (min-width: 769px) and (max-width: 1024px) {
+    /* Rail Nav を小さく表示 */
+    .rail-nav {
+        width: 60px;
+        padding: 0.5rem 0;
+    }
+
+    .rail-nav a {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+    }
+
+    .rail-nav a i {
+        font-size: 20px;
+    }
+
+    .rail-nav a span {
+        font-size: 10px;
+        margin-top: 2px;
+    }
+
+    /* Bottom Nav は非表示 */
+    .bottom-nav {
+        display: none;
+    }
+
+    /* Main のパディング調整 */
+    main {
+        padding: 0.5rem 1rem;
+    }
+
+    /* サムネイル・履歴サイズ調整 */
+    .history-thumbnail {
+        width: 100px;
+        height: 75px;
+    }
+
+    .thumbnail-container {
+        border-radius: 10px;
+    }
+
+    /* 文字サイズ調整 */
+    .video-info-card,
+    .settings-item {
+        padding: 1rem;
+    }
+
+    .video-meta i {
+        font-size: 16px;
+    }
+
+    footer .progress-text,
+    footer .progress-stats {
+        font-size: 11px;
+    }
+
+    /* モーダル調整 */
+    dialog {
+        width: 80%;
+        max-width: 480px;
+    }
+}
+
