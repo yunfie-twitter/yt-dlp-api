@@ -111,6 +111,8 @@ class VideoInfoService:
                         "format_id": f.get("format_id"),
                         "ext": f.get("ext"),
                         "resolution": f.get("resolution"),
+                        "height": f.get("height"),
+                        "width": f.get("width"),
                         "filesize": f.get("filesize"),
                         "vcodec": f.get("vcodec"),
                         "acodec": f.get("acodec"),
