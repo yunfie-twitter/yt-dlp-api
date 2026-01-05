@@ -733,9 +733,10 @@
                     <div class="max"></div>
                     
                     <button 
-                        v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued'"
+                        v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
                         @click="addRipple($event); cancelDownload()" 
                         class="circle transparent"
+                        :disabled="downloadProgress.status === 'cancelling'"
                         title="キャンセル">
                         <i>close</i>
                     </button>
@@ -1045,13 +1046,17 @@
                                 setTimeout(() => {
                                     triggerBrowserDownload(taskId)
                                 }, 500)
-                            } else if (data.status === 'cancelled') {
-                                downloadProgress.value = null
-                                downloading.value = false
-                                currentTaskId.value = null
-                                if (websocket.value) {
-                                    websocket.value.close()
-                                }
+                            } else if (data.status === 'cancelled' || data.status === 'error') {
+                                // Wait a bit to show the status, then cleanup
+                                setTimeout(() => {
+                                    downloadProgress.value = null
+                                    downloading.value = false
+                                    currentTaskId.value = null
+                                    if (websocket.value) {
+                                        websocket.value.close()
+                                        websocket.value = null
+                                    }
+                                }, 2000)
                             }
                         } catch (e) {
                             console.error('WebSocket message parse error:', e)
@@ -1080,6 +1085,12 @@
                         downloading.value = false
                         currentTaskId.value = null
                         
+                        // Close WebSocket after file download
+                        if (websocket.value) {
+                            websocket.value.close()
+                            websocket.value = null
+                        }
+                        
                         if (info.value) {
                             saveToHistory(info.value)
                         }
@@ -1089,6 +1100,12 @@
                 const cancelDownload = async () => {
                     if (!currentTaskId.value) return
                     
+                    // Show cancelling status immediately
+                    if (downloadProgress.value) {
+                        downloadProgress.value.status = 'cancelling'
+                        downloadProgress.value.message = 'キャンセル中...'
+                    }
+                    
                     try {
                         const res = await fetch(`/download/cancel/${currentTaskId.value}`, {
                             method: 'POST'
@@ -1096,9 +1113,31 @@
                         
                         if (res.ok) {
                             console.log('Download cancelled')
+                        } else {
+                            console.error('Cancel failed')
+                            // Still cleanup on error
+                            setTimeout(() => {
+                                downloadProgress.value = null
+                                downloading.value = false
+                                currentTaskId.value = null
+                                if (websocket.value) {
+                                    websocket.value.close()
+                                    websocket.value = null
+                                }
+                            }, 2000)
                         }
                     } catch (e) {
                         console.error('Cancel error:', e)
+                        // Cleanup on network error
+                        setTimeout(() => {
+                            downloadProgress.value = null
+                            downloading.value = false
+                            currentTaskId.value = null
+                            if (websocket.value) {
+                                websocket.value.close()
+                                websocket.value = null
+                            }
+                        }, 2000)
                     }
                 }
 
@@ -1115,6 +1154,7 @@
                     try {
                         const payload = { url: url.value }
                         if (selectedQuality.value === 'audio') {
+                            // For audio-only, set audio_format flag
                             payload.audio_format = 'mp3'
                         } else if (selectedQuality.value) {
                             payload.quality = parseInt(selectedQuality.value)
