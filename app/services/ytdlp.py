@@ -87,6 +87,7 @@ class YTDLPCommandBuilder:
             '--socket-timeout', str(config.download.socket_timeout),
             '--retries', str(config.download.retries),
             '-f', format_str,
+            '--no-warnings',  # Suppress warnings that might interfere
             url
         ]
         
@@ -151,6 +152,9 @@ class YTDLPCommandBuilder:
             cmd.append('-x')
             if file_format:
                 cmd.extend(['--audio-format', file_format])
+            else:
+                # Default to mp3 if no format specified
+                cmd.extend(['--audio-format', 'mp3'])
         else:
             # Video mode
             if file_format:
@@ -160,5 +164,8 @@ class YTDLPCommandBuilder:
                      # Use NVENC for H264 conversion (common for mp4/mkv)
                      # Note: This is a best-effort configuration for NVENC
                      cmd.extend(['--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc -preset p4'])
+            else:
+                # If no file format specified, try to merge into mp4
+                cmd.extend(['--merge-output-format', 'mp4'])
 
         return cmd
