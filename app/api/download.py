@@ -52,13 +52,8 @@ class DownloadService:
         safe_url = safe_url_for_log(intent.url)
         
         # 1. Determine Format String
-        format_str = intent.custom_format
-        if intent.custom_format and intent.audio_format and not intent.audio_only:
-             format_str = f"{intent.custom_format}+{intent.audio_format}"
-        elif not format_str and intent.audio_format:
-            format_str = intent.audio_format
-        if not format_str:
-            format_str = FormatDecision.decide(intent)
+        # Use FormatDecision to determine format string
+        format_str = FormatDecision.decide(intent)
             
         log_info(request, f"Format decided: {format_str} for {safe_url}")
         
@@ -393,6 +388,8 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
                     await websocket.send_text('pong')
             except WebSocketDisconnect:
                 break
+            except Exception:
+                break
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
@@ -402,6 +399,7 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
                 websocket_connections[task_id].remove(websocket)
             if not websocket_connections[task_id]:
                 del websocket_connections[task_id]
+        # DO NOT delete task info here - keep it until file is downloaded
 
 @router.get("/download/file/{task_id}")
 async def download_file(task_id: str):
@@ -436,6 +434,12 @@ async def download_file(task_id: str):
                 os.remove(file_path)
             if task_id in download_tasks:
                 del download_tasks[task_id]
+            # Close any remaining WebSocket connections
+            if task_id in websocket_connections:
+                for ws in websocket_connections[task_id]:
+                    with suppress(Exception):
+                        await ws.close()
+                del websocket_connections[task_id]
     
     encoded_filename = quote(filename)
     headers = {
