@@ -8,33 +8,28 @@ class FormatDecision:
     def decide(intent: DownloadIntent) -> str:
         """Decide format string based on intent"""
         if intent.custom_format:
+            # If custom_format is specified with audio_format, combine them
+            if intent.audio_format and not intent.audio_only:
+                return f"{intent.custom_format}+{intent.audio_format}/best"
             # Fallback to default if custom format fails
-            # This handles cases where the specified format_id doesn't exist
-            return f"{intent.custom_format}/{config.ytdlp.default_format}"
+            return f"{intent.custom_format}/best"
         
         if intent.audio_only:
-            # Logic updated to support string formats directly or simple presets
-            af = str(intent.audio_format).lower() if intent.audio_format else ""
-            
-            if 'mp3' in af:
-                return 'bestaudio' # yt-dlp will convert if -x --audio-format mp3 is passed
-            elif 'm4a' in af:
-                return 'bestaudio[ext=m4a]/bestaudio'
-            elif 'opus' in af:
-                return 'bestaudio[ext=webm]/bestaudio'
-            else:
-                # Default audio strategy
-                return 'bestaudio/best'
+            # For audio-only downloads, always use bestaudio
+            # The actual format conversion is handled by -x --audio-format
+            return 'bestaudio/best'
         
         if intent.quality:
             return (
-                f"bestvideo[ext=mp4][height<={intent.quality}]+bestaudio[ext=m4a]/"
-                f"best[ext=mp4][height<={intent.quality}]/best"
+                f"bestvideo[height<={intent.quality}]+bestaudio/"
+                f"bestvideo[height<={intent.quality}]/"
+                f"best[height<={intent.quality}]/"
+                f"best"
             )
         
-        # Default behavior: Merge best video and best audio
-        # If merging is not possible (e.g. progressive stream only), fallback to 'best'
-        return "bestvideo+bestaudio/best"
+        # Default behavior: Best quality with proper fallback chain
+        # Try merging best video and audio first, then fallback progressively
+        return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
     
     @staticmethod
     def get_metadata(intent: DownloadIntent) -> MediaMetadata:
@@ -55,7 +50,7 @@ class FormatDecision:
             elif 'm4a' in af:
                 return MediaMetadata(format_str=format_str, ext='m4a', media_type='audio/mp4')
             else:
-                return MediaMetadata(format_str=format_str, ext='webm', media_type='audio/webm')
+                return MediaMetadata(format_str=format_str, ext='mp3', media_type='audio/mpeg')
         
         return MediaMetadata(
             format_str=format_str,
