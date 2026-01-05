@@ -664,4 +664,50 @@ a:hover {
         max-width: 480px;
     }
 }
+/* ラベルやカード内のテキストを1行に固定 */
+.rail-nav a span,
+.bottom-nav a span,
+.history-item .history-title,
+.video-info-card h6,
+.settings-item h6 {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 360px) {
+    /* 文字サイズ縮小 */
+    .rail-nav a span,
+    .bottom-nav a span {
+        font-size: 9px;
+    }
+
+    .history-item,
+    .video-info-card,
+    .settings-item {
+        font-size: 12px;
+    }
+
+    .history-thumbnail {
+        width: 70px;
+        height: 55px;
+    }
+
+    .thumbnail-container {
+        border-radius: 6px;
+    }
+
+    main {
+        padding: 0.5rem;
+    }
+
+    dialog {
+        width: 95%;
+        max-width: 280px;
+    }
+}
+.rail-nav a,
+.bottom-nav a {
+    min-width: 40px;
+    max-width: 56px;
+}
 
