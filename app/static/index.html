@@ -8,11 +8,6 @@
     <!-- External CSS -->
     <link href="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.css" rel="stylesheet">
     <link href="/static/style.css" rel="stylesheet">
-    
-    <!-- External JS Libraries -->
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
 <body class="dark">
     <div id="app" style="display: flex; width: 100%; height: 100%;">
@@ -166,7 +161,7 @@
                                 </p>
                                 <p class="small">
                                     <i>schedule</i>
-                                    {{ new Date(item.timestamp).toLocaleString('ja-JP') }}
+                                    {{ formatTimestamp(item.timestamp) }}
                                 </p>
                             </div>
                             <button @click.stop="addRipple($event); deleteHistoryItem(index)" class="circle transparent history-delete">
@@ -288,7 +283,7 @@
                 <h6>情報</h6>
                 <p class="small">
                     <i>info</i>
-                    <span>バージョン 2.0.0</span>
+                    <span>バージョン 2.1.0</span>
                 </p>
                 <p class="small">
                     <i>code</i>
@@ -299,10 +294,12 @@
             </div>
 
             <div class="settings-item">
-                <p class="small" style="opacity: 0.5; font-style: italic;">
-                    <i>update</i>
-                    <span>今後のアップデートで項目が追加されます</span>
-                </p>
+                <h6>使用ライブラリ</h6>
+                <p class="small"><i>check_circle</i> VueUse - 自動メモリ管理</p>
+                <p class="small"><i>check_circle</i> Axios - 信頼性の高いHTTP</p>
+                <p class="small"><i>check_circle</i> DayJS - 日付フォーマット</p>
+                <p class="small"><i>check_circle</i> DOMPurify - XSS対策</p>
+                <p class="small"><i>check_circle</i> ReconnectingWebSocket - 自動再接続</p>
             </div>
 
             <nav class="right-align" style="margin-top: 1rem;">
@@ -311,6 +308,28 @@
         </dialog>
     </div>
 
+    <!-- External JS Libraries (CDN) -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+    
+    <!-- Core Libraries -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/@vueuse/shared@11.3.0/index.iife.min.js"></script>
+    <script src="https://unpkg.com/@vueuse/core@11.3.0/index.iife.min.js"></script>
+    <script src="https://unpkg.com/axios@1.7.9/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.13/dayjs.min.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.13/plugin/duration.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.13/plugin/relativeTime.js"></script>
+    <script src="https://unpkg.com/dompurify@3.2.2/dist/purify.min.js"></script>
+    <script src="https://unpkg.com/reconnecting-websocket@4.4.0/dist/reconnecting-websocket-iife.min.js"></script>
+    
+    <script>
+        // Initialize dayjs plugins
+        dayjs.extend(window.dayjs_plugin_duration)
+        dayjs.extend(window.dayjs_plugin_relativeTime)
+        dayjs.locale('ja')
+    </script>
+    
     <!-- Application JavaScript -->
     <script src="/static/app.js"></script>
 </body>
