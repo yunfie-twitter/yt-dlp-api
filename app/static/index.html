@@ -630,7 +630,7 @@
                                         <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
                                     </div>
 
-                                    <div class="field suffix border quality-selector" v-if="availableQualities.length > 0">
+                                    <div class="field suffix border quality-selector">
                                         <select v-model="selectedQuality">
                                             <option value="">最高画質 (Best)</option>
                                             <option v-for="quality in availableQualities" :key="quality" :value="quality">{{ quality }}p</option>
