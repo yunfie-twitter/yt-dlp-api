@@ -34,7 +34,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# Global dictionary to track download progress
+# Global dictionary to track download progress and process
 download_tasks: Dict[str, dict] = {}
 # WebSocket connections per task
 websocket_connections: Dict[str, list] = {}
@@ -131,6 +131,9 @@ class DownloadService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
+        # Store process for cancellation
+        download_tasks[task_id]['process'] = process
+        
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         
         async def parse_progress():
@@ -194,6 +197,10 @@ class DownloadService:
         
         try:
             returncode = await process.wait()
+            
+            # Check if cancelled
+            if download_tasks[task_id].get('cancelled', False):
+                raise Exception("Download cancelled by user")
             
             if returncode != 0:
                 error_summary = '\n'.join(stderr_lines)
@@ -291,6 +298,8 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'file_path': None,
         'file_size': None,
         'error': None,
+        'process': None,
+        'cancelled': False,
         'created_at': time.time()
     }
     
@@ -311,6 +320,47 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'task_id': task_id,
         'status': 'queued',
         'message': 'Download task created'
+    })
+
+@router.post("/download/cancel/{task_id}")
+async def cancel_download(task_id: str):
+    """Cancel an ongoing download"""
+    
+    if task_id not in download_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task_info = download_tasks[task_id]
+    
+    # Mark as cancelled
+    task_info['cancelled'] = True
+    
+    # Kill the process if it exists
+    if 'process' in task_info and task_info['process']:
+        process = task_info['process']
+        try:
+            process.kill()
+            await process.wait()
+        except:
+            pass
+    
+    # Update status
+    task_info['status'] = 'cancelled'
+    
+    # Broadcast cancellation
+    await DownloadService.broadcast_progress(task_id, {
+        'status': 'cancelled',
+        'message': 'ダウンロードがキャンセルされました'
+    })
+    
+    # Cleanup temp files
+    if task_info.get('file_path') and os.path.exists(task_info['file_path']):
+        with suppress(OSError):
+            os.remove(task_info['file_path'])
+    
+    return JSONResponse({
+        'task_id': task_id,
+        'status': 'cancelled',
+        'message': 'Download cancelled successfully'
     })
 
 @router.websocket("/download/progress/ws/{task_id}")
