@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100..900&display=swap');
 /* Base Layout */
 body {
     display: flex;
@@ -5,6 +6,11 @@ body {
     height: 100vh;
     margin: 0;
     overflow: hidden;
+  font-family: "Noto Sans JP", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: <weight>;
+  font-style: normal;
+
 }
 
 /* Rail Navigation */
