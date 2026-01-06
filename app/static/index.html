@@ -207,14 +207,23 @@
                         </div>
                     </div>
 
-                    <!-- Column 3: Close Button (Right Anchor) -->
+                    <!-- Column 3: Action Button (Right Anchor) -->
                     <div class="action-col">
+                        <!-- During download: cancel icon -->
                         <button 
                             v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
-                            @click="addRipple($event); cancelDownload()" 
+                            @click="addRipple($event); confirmCancelDownload()" 
                             class="circle transparent"
                             :disabled="downloadProgress.status === 'cancelling'"
-                            title="キャンセル">
+                            :title="t('common.cancel')">
+                            <i>cancel</i>
+                        </button>
+                        <!-- After completion or cancellation: close icon -->
+                        <button 
+                            v-else
+                            @click="addRipple($event); closeProgressBar()" 
+                            class="circle transparent"
+                            :title="t('common.close')">
                             <i>close</i>
                         </button>
                     </div>
@@ -252,6 +261,7 @@
 
         <!-- Modal Overlays -->
         <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
+        <div class="modal-overlay" :class="{ active: showCancelModal }" @click="showCancelModal = false"></div>
         <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
         <div class="modal-overlay" :class="{ active: showErrorModal }" @click="closeErrorModal"></div>
 
@@ -265,6 +275,19 @@
             <nav class="right-align">
                 <button @click="addRipple($event); showDeleteModal = false" class="border">{{ t('common.cancel') }}</button>
                 <button @click="addRipple($event); clearHistory()" class="primary">{{ t('common.delete') }}</button>
+            </nav>
+        </dialog>
+
+        <!-- Cancel Download Confirmation Dialog -->
+        <dialog :class="{ active: showCancelModal }">
+            <button class="modal-close circle transparent" @click.stop="showCancelModal = false">
+                <i>close</i>
+            </button>
+            <h5>{{ t('download.cancel_title') }}</h5>
+            <p>{{ t('download.cancel_message') }}</p>
+            <nav class="right-align">
+                <button @click="addRipple($event); showCancelModal = false" class="border">{{ t('common.back') }}</button>
+                <button @click="addRipple($event); cancelDownload()" class="primary">{{ t('common.cancel') }}</button>
             </nav>
         </dialog>
 
