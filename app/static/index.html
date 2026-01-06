@@ -67,12 +67,7 @@
                                     <progress v-if="loading" class="circle small download-progress"></progress>
                                 </button>
                             </nav>
-                            <div v-if="error" class="small-padding error-enter-active">
-                                <article class="red-border round">
-                                    <i>error</i>
-                                    <p>{{ error }}</p>
-                                </article>
-                            </div>
+                            <!-- Error display removed here, moved to modal -->
                         </div>
                     </article>
 
@@ -247,6 +242,7 @@
         <!-- Modal Overlays -->
         <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
         <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
+        <div class="modal-overlay" :class="{ active: showErrorModal }" @click="closeErrorModal"></div>
 
         <!-- Delete Confirmation Dialog -->
         <dialog :class="{ active: showDeleteModal }">
@@ -258,6 +254,21 @@
             <nav class="right-align">
                 <button @click="addRipple($event); showDeleteModal = false" class="border">キャンセル</button>
                 <button @click="addRipple($event); clearHistory()" class="primary">削除</button>
+            </nav>
+        </dialog>
+
+        <!-- Error Dialog -->
+        <dialog :class="{ active: showErrorModal }" class="error-dialog">
+            <button class="modal-close circle transparent" @click.stop="closeErrorModal">
+                <i>close</i>
+            </button>
+            <h5 class="red-text">
+                <i>error</i>
+                エラー
+            </h5>
+            <p>{{ error }}</p>
+            <nav class="right-align">
+                <button @click="addRipple($event); closeErrorModal()" class="primary">閉じる</button>
             </nav>
         </dialog>
 
