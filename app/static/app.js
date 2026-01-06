@@ -81,6 +81,33 @@ createApp({
             apiBaseUrl.value = defaultApiBase
         }
 
+        // --- Setup Wizard Logic Start ---
+        const setupCompleted = useStorage('setupCompleted', false)
+        const showSetupWizard = computed(() => !setupCompleted.value)
+        const setupStep = ref(1)
+        const setupLanguage = ref(currentLocale.value)
+        const setupApiUrl = ref(apiBaseUrl.value)
+
+        // Sync setup language changes
+        watch(setupLanguage, (newLang) => {
+            changeLanguage(newLang)
+        })
+
+        const nextSetupStep = () => {
+            setupStep.value++
+        }
+
+        const prevSetupStep = () => {
+            setupStep.value--
+        }
+
+        const completeSetup = () => {
+            apiBaseUrl.value = setupApiUrl.value
+            saveApiBase()
+            setupCompleted.value = true
+        }
+        // --- Setup Wizard Logic End ---
+
         // API client with axios (singleton)
         const api = axios.create({
             timeout: 15000,
@@ -98,6 +125,9 @@ createApp({
         let disconnectToastTimeout = null
         
         const showDisconnectNotification = () => {
+            // Don't show if in setup wizard
+            if (showSetupWizard.value) return
+            
             showDisconnectedToast.value = true
             // Clear any existing hide timeout
             if (disconnectToastTimeout) {
@@ -143,6 +173,9 @@ createApp({
         let healthCheckInterval = null
         
         const checkApiHealth = async () => {
+            // Skip health check during setup
+            if (showSetupWizard.value) return
+
             try {
                 // Try simple GET request to root or a lightweight health endpoint
                 await axios.get(`${getApiBase()}/`, { timeout: 5000 })
@@ -752,7 +785,9 @@ createApp({
             // Error Modal
             showErrorModal, closeErrorModal,
             // i18n
-            t, currentLocale, changeLanguage, isLocalesLoading
+            t, currentLocale, changeLanguage, isLocalesLoading,
+            // Setup Wizard
+            showSetupWizard, setupStep, setupLanguage, setupApiUrl, nextSetupStep, prevSetupStep, completeSetup
         }
     }
 }).mount('#app')
