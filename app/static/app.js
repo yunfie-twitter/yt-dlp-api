@@ -4,7 +4,7 @@
  * Optimizations: granular reactivity, minimal re-renders, cancellable requests
  */
 
-const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue
+const { createApp, ref, computed, onMounted, onUnmounted, watch, nextTick } = Vue
 const { 
     useStorage, 
     useDark, 
@@ -242,6 +242,23 @@ createApp({
             }
         })
 
+        // Watch progressFilename for overflow detection (marquee)
+        watch(progressFilename, async (newVal) => {
+            if (!newVal) return
+            await nextTick()
+            const progressTextEl = document.querySelector('.progress-text')
+            const strongEl = progressTextEl?.querySelector('strong')
+            if (progressTextEl && strongEl) {
+                // Check if text overflows container
+                if (strongEl.scrollWidth > progressTextEl.clientWidth) {
+                    progressTextEl.classList.add('overflow')
+                    strongEl.setAttribute('data-text', newVal)
+                } else {
+                    progressTextEl.classList.remove('overflow')
+                }
+            }
+        })
+
         // History management with minimal updates (splice instead of reassign)
         const saveToHistory = (videoInfo) => {
             const historyItem = {
@@ -389,96 +406,115 @@ createApp({
 
         // WebSocket - singleton with reconnection
         let ws = null
+        let wsConnectionTimeout = null
         
         const connectWebSocket = (taskId) => {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-            const apiBase = getApiBase()
-            const host = apiBase.replace(/^https?:\/\//, '')
-            const wsUrl = `${protocol}//${host}/download/progress/ws/${taskId}`
-            
-            // Close existing connection if any
-            if (ws) {
-                ws.close()
-                ws = null
+            // Safari fix: delay WebSocket connection slightly
+            if (wsConnectionTimeout) {
+                clearTimeout(wsConnectionTimeout)
             }
             
-            ws = new ReconnectingWebSocket(wsUrl, [], {
-                maxRetries: 10,
-                reconnectionDelayGrowFactor: 1.3,
-                maxReconnectionDelay: 4000,
-                minReconnectionDelay: 1000
-            })
-            
-            ws.addEventListener('open', () => {
-                console.log('WebSocket connected')
-                hideDisconnectNotification()
-            })
-            
-            ws.addEventListener('message', (event) => {
-                // Ignore pong messages
-                if (event.data === 'pong') return
+            wsConnectionTimeout = setTimeout(() => {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+                const apiBase = getApiBase()
+                const host = apiBase.replace(/^https?:\/\//, '')
+                const wsUrl = `${protocol}//${host}/download/progress/ws/${taskId}`
                 
-                try {
-                    const data = JSON.parse(event.data)
+                // Close existing connection if any
+                if (ws) {
+                    ws.close()
+                    ws = null
+                }
+                
+                ws = new ReconnectingWebSocket(wsUrl, [], {
+                    maxRetries: 10,
+                    reconnectionDelayGrowFactor: 1.3,
+                    maxReconnectionDelay: 4000,
+                    minReconnectionDelay: 1000,
+                    debug: false
+                })
+                
+                ws.addEventListener('open', () => {
+                    console.log('WebSocket connected')
+                    hideDisconnectNotification()
+                })
+                
+                ws.addEventListener('message', (event) => {
+                    // Ignore pong messages
+                    if (event.data === 'pong') return
                     
-                    // Optimized: only update changed values to minimize re-renders
-                    if (data.status && data.status !== progressStatus.value) {
-                        progressStatus.value = data.status
+                    try {
+                        const data = JSON.parse(event.data)
+                        
+                        // Optimized: only update changed values to minimize re-renders
+                        if (data.status && data.status !== progressStatus.value) {
+                            progressStatus.value = data.status
+                        }
+                        if (data.progress !== undefined && data.progress !== progressValue.value) {
+                            progressValue.value = data.progress
+                        }
+                        if (data.message && data.message !== progressMessage.value) {
+                            progressMessage.value = data.message
+                        }
+                        if (data.filename && data.filename !== progressFilename.value) {
+                            progressFilename.value = data.filename
+                        }
+                        if (data.speed && data.speed !== progressSpeed.value) {
+                            progressSpeed.value = data.speed
+                        }
+                        if (data.eta && data.eta !== progressEta.value) {
+                            progressEta.value = data.eta
+                        }
+                        
+                        if (data.status === 'completed') {
+                            setTimeout(() => {
+                                triggerBrowserDownload(taskId)
+                            }, 500)
+                        } else if (data.status === 'cancelled' || data.status === 'error') {
+                            setTimeout(() => {
+                                resetProgress()
+                                if (data.status === 'error') {
+                                    triggerError(data.message || t('messages.download_error'))
+                                }
+                            }, 2000)
+                        }
+                    } catch (e) {
+                        console.error('WebSocket message parse error:', e)
                     }
-                    if (data.progress !== undefined && data.progress !== progressValue.value) {
-                        progressValue.value = data.progress
-                    }
-                    if (data.message && data.message !== progressMessage.value) {
-                        progressMessage.value = data.message
-                    }
-                    if (data.filename && data.filename !== progressFilename.value) {
-                        progressFilename.value = data.filename
-                    }
-                    if (data.speed && data.speed !== progressSpeed.value) {
-                        progressSpeed.value = data.speed
-                    }
-                    if (data.eta && data.eta !== progressEta.value) {
-                        progressEta.value = data.eta
-                    }
-                    
-                    if (data.status === 'completed') {
+                })
+                
+                ws.addEventListener('error', (error) => {
+                    console.error('WebSocket error:', error)
+                    // Don't show disconnect immediately on Safari
+                    setTimeout(() => {
+                        if (ws && ws.readyState !== WebSocket.OPEN) {
+                            showDisconnectNotification()
+                        }
+                    }, 1000)
+                })
+                
+                ws.addEventListener('close', (event) => {
+                    console.log('WebSocket disconnected', event.code)
+                    // Only show disconnect if it wasn't a normal closure
+                    if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) {
+                        // Delay showing disconnect notification
                         setTimeout(() => {
-                            triggerBrowserDownload(taskId)
-                        }, 500)
-                    } else if (data.status === 'cancelled' || data.status === 'error') {
-                        setTimeout(() => {
-                            resetProgress()
-                            if (data.status === 'error') {
-                                triggerError(data.message || t('messages.download_error'))
+                            if (progressStatus.value && progressStatus.value !== 'completed') {
+                                showDisconnectNotification()
                             }
                         }, 2000)
                     }
-                } catch (e) {
-                    console.error('WebSocket message parse error:', e)
-                }
-            })
-            
-            ws.addEventListener('error', (error) => {
-                console.error('WebSocket error:', error)
-                showDisconnectNotification()
-            })
-            
-            ws.addEventListener('close', (event) => {
-                console.log('WebSocket disconnected', event.code)
-                // Only show disconnect if it wasn't a normal closure
-                if (event.code !== 1000 && event.code !== 1001) {
-                    showDisconnectNotification()
-                }
-            })
+                })
 
-            // Send ping every 30 seconds
-            const pingInterval = setInterval(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send('ping')
-                } else {
-                    clearInterval(pingInterval)
-                }
-            }, 30000)
+                // Send ping every 30 seconds
+                const pingInterval = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send('ping')
+                    } else {
+                        clearInterval(pingInterval)
+                    }
+                }, 30000)
+            }, 300) // 300ms delay for Safari
         }
         
         // Reset progress state
@@ -491,6 +527,11 @@ createApp({
             progressEta.value = ''
             downloading.value = false
             currentTaskId.value = null
+            
+            if (wsConnectionTimeout) {
+                clearTimeout(wsConnectionTimeout)
+                wsConnectionTimeout = null
+            }
             
             if (ws) {
                 ws.close()
@@ -593,6 +634,11 @@ createApp({
             // Cancel pending requests
             if (abortController) {
                 abortController.abort()
+            }
+            
+            // Clear WebSocket timeout
+            if (wsConnectionTimeout) {
+                clearTimeout(wsConnectionTimeout)
             }
             
             // Close WebSocket
