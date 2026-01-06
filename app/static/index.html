@@ -10,25 +10,25 @@
     <link href="style.css" rel="stylesheet">
 </head>
 <body class="dark">
-    <div id="app" style="display: flex; width: 100%; height: 100%;">
+    <div id="app" style="display: flex; width: 100%; height: 100%;" v-if="!isLocalesLoading">
         <!-- Rail Navigation -->
         <div class="rail-nav">
             <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
                 <i>home</i>
-                <span>ホーム</span>
+                <span>{{ t('common.home') }}</span>
             </a>
             <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
                 <i>history</i>
-                <span>履歴</span>
+                <span>{{ t('common.history') }}</span>
             </a>
             <div style="flex: 1;"></div>
             <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
                 <i>code</i>
-                <span>GitHub</span>
+                <span>{{ t('common.github') }}</span>
             </a>
             <a @click="toggleThemeManual">
                 <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                <span>テーマ</span>
+                <span>{{ t('common.theme') }}</span>
             </a>
         </div>
 
@@ -51,23 +51,22 @@
                 <div v-if="currentPage === 'home'" class="page-enter-active">
                     <article class="border">
                         <div class="padding">
-                            <h6>動画URLを入力</h6>
+                            <h6>{{ t('home.title') }}</h6>
                             <div class="field label border">
                                 <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
-                                <label>YouTube, ニコニコ動画, Twitter など</label>
+                                <label>{{ t('home.placeholder') }}</label>
                             </div>
                             <nav class="right-align">
                                 <button @click="addRipple($event); pasteFromClipboard()" :disabled="loading" class="primary">
                                     <i>content_paste</i>
-                                    <span>貼り付け</span>
+                                    <span>{{ t('home.paste') }}</span>
                                 </button>
                                 <button @click="addRipple($event); fetchInfo()" :disabled="loading || !url" class="primary">
                                     <i>search</i>
-                                    <span>解析</span>
+                                    <span>{{ t('home.analyze') }}</span>
                                     <progress v-if="loading" class="circle small download-progress"></progress>
                                 </button>
                             </nav>
-                            <!-- Error display removed here, moved to modal -->
                         </div>
                     </article>
 
@@ -80,7 +79,7 @@
                                         {{ formatDuration(info.duration) }}
                                     </div>
                                     <div class="thumbnail-overlay" v-else>
-                                        LIVE
+                                        {{ t('home.live') }}
                                     </div>
                                 </div>
                             </div>
@@ -89,18 +88,18 @@
                                     <h6 class="small">{{ info.title }}</h6>
                                     <div class="video-meta">
                                         <i>person</i>
-                                        <span>{{ info.uploader || 'Unknown' }}</span>
+                                        <span>{{ info.uploader || t('home.unknown_uploader') }}</span>
                                     </div>
                                     <div class="video-meta">
                                         <i>visibility</i>
-                                        <span>{{ info.view_count?.toLocaleString() || '0' }} views</span>
+                                        <span>{{ info.view_count?.toLocaleString() || '0' }} {{ t('home.views') }}</span>
                                     </div>
 
                                     <div class="field suffix border quality-selector">
                                         <select v-model="selectedQuality">
-                                            <option value="">最高画質 (Best)</option>
+                                            <option value="">{{ t('home.best_quality') }}</option>
                                             <option v-for="quality in availableQualities" :key="quality" :value="quality">{{ quality }}p</option>
-                                            <option value="audio">音声のみ (Audio)</option>
+                                            <option value="audio">{{ t('home.audio_only') }}</option>
                                         </select>
                                         <i>high_quality</i>
                                     </div>
@@ -108,7 +107,7 @@
                                     <nav>
                                         <button @click="addRipple($event); download()" :disabled="downloading" class="responsive primary">
                                             <i>download</i>
-                                            <span>ダウンロード</span>
+                                            <span>{{ t('home.download') }}</span>
                                             <progress v-if="downloading" class="circle small download-progress"></progress>
                                         </button>
                                     </nav>
@@ -123,10 +122,10 @@
                     <article class="border">
                         <div class="padding">
                             <div class="row">
-                                <h5 class="max">ダウンロード履歴</h5>
+                                <h5 class="max">{{ t('history.title') }}</h5>
                                 <button @click="addRipple($event); confirmClearHistory()" class="primary" :disabled="history.length === 0">
                                     <i>delete_sweep</i>
-                                    <span>クリア</span>
+                                    <span>{{ t('history.clear') }}</span>
                                 </button>
                             </div>
                         </div>
@@ -136,10 +135,10 @@
                         <article class="border center-align">
                             <div class="padding">
                                 <i class="extra">history</i>
-                                <p>履歴がありません</p>
+                                <p>{{ t('history.empty') }}</p>
                                 <button @click="addRipple($event); navigateToPage('home')" class="primary">
                                     <i>home</i>
-                                    <span>ホームに戻る</span>
+                                    <span>{{ t('history.back_home') }}</span>
                                 </button>
                             </div>
                         </article>
@@ -184,7 +183,7 @@
                     
                     <div class="progress-info">
                         <div class="progress-text">
-                            <strong>{{ downloadProgress.filename || '処理中...' }}</strong>
+                            <strong>{{ downloadProgress.filename || t('messages.processing') }}</strong>
                         </div>
                         <div class="progress-bar">
                             <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
@@ -216,19 +215,19 @@
             <nav>
                 <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
                     <i>home</i>
-                    <span>ホーム</span>
+                    <span>{{ t('common.home') }}</span>
                 </a>
                 <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
                     <i>history</i>
-                    <span>履歴</span>
+                    <span>{{ t('common.history') }}</span>
                 </a>
                 <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
                     <i>code</i>
-                    <span>GitHub</span>
+                    <span>{{ t('common.github') }}</span>
                 </a>
                 <a @click="toggleThemeManual">
                     <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                    <span>テーマ</span>
+                    <span>{{ t('common.theme') }}</span>
                 </a>
             </nav>
         </div>
@@ -236,7 +235,7 @@
         <!-- Connection Toast -->
         <div v-if="showDisconnectedToast" :class="['conn-toast', isMobileOrTablet() ? 'mobile' : 'desktop']">
             <i>cloud_off</i>
-            <span>サーバーとの接続が切断されました</span>
+            <span>{{ t('messages.disconnected') }}</span>
         </div>
 
         <!-- Modal Overlays -->
@@ -249,11 +248,11 @@
             <button class="modal-close circle transparent" @click.stop="showDeleteModal = false">
                 <i>close</i>
             </button>
-            <h5>履歴を削除</h5>
-            <p>すべてのダウンロード履歴を削除しますか?</p>
+            <h5>{{ t('history.confirm_title') }}</h5>
+            <p>{{ t('history.confirm_message') }}</p>
             <nav class="right-align">
-                <button @click="addRipple($event); showDeleteModal = false" class="border">キャンセル</button>
-                <button @click="addRipple($event); clearHistory()" class="primary">削除</button>
+                <button @click="addRipple($event); showDeleteModal = false" class="border">{{ t('common.cancel') }}</button>
+                <button @click="addRipple($event); clearHistory()" class="primary">{{ t('common.delete') }}</button>
             </nav>
         </dialog>
 
@@ -264,11 +263,11 @@
             </button>
             <h5 class="red-text">
                 <i>error</i>
-                エラー
+                {{ t('common.error') }}
             </h5>
             <p>{{ error }}</p>
             <nav class="right-align">
-                <button @click="addRipple($event); closeErrorModal()" class="primary">閉じる</button>
+                <button @click="addRipple($event); closeErrorModal()" class="primary">{{ t('common.close') }}</button>
             </nav>
         </dialog>
 
@@ -277,13 +276,25 @@
             <button class="modal-close circle transparent" @click.stop="showSettingsModal = false">
                 <i>close</i>
             </button>
-            <h5 style="margin-bottom: 1.5rem;">設定</h5>
+            <h5 style="margin-bottom: 1.5rem;">{{ t('common.settings') }}</h5>
             
+            <div class="settings-item">
+                <h6>{{ t('settings.language') }}</h6>
+                <div class="field suffix border" style="margin-top: 0.5rem;">
+                    <select :value="currentLocale" @change="changeLanguage($event.target.value)">
+                        <option value="ja">日本語</option>
+                        <option value="en">English</option>
+                    </select>
+                    <i>language</i>
+                </div>
+                <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_language') }}</p>
+            </div>
+
             <div class="settings-item">
                 <div class="row">
                     <div class="max">
-                        <h6>外観</h6>
-                        <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">テーマを変更</p>
+                        <h6>{{ t('settings.appearance') }}</h6>
+                        <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_theme') }}</p>
                     </div>
                     <label class="switch">
                         <input type="checkbox" :checked="isDarkMode" @change="toggleTheme">
@@ -292,44 +303,44 @@
                 </div>
                 <p class="small">
                     <i>{{ isDarkMode ? 'dark_mode' : 'light_mode' }}</i>
-                    <span>{{ isDarkMode ? 'ダークモード' : 'ライトモード' }}</span>
+                    <span>{{ isDarkMode ? t('settings.dark_mode') : t('settings.light_mode') }}</span>
                 </p>
             </div>
 
             <div class="settings-item">
-                <h6>APIサーバー</h6>
+                <h6>{{ t('settings.api_server') }}</h6>
                 <div class="field label border" style="margin-top: 0.5rem;">
                     <input v-model="apiBaseUrl" @change="saveApiBase" type="text">
-                    <label>APIベースURL</label>
+                    <label>{{ t('settings.api_base_url') }}</label>
                 </div>
                 <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">
                     <i>info</i>
-                    <span>デフォルト: {{ defaultApiBase }}</span>
+                    <span>{{ t('settings.default') }}: {{ defaultApiBase }}</span>
                 </p>
                 <nav style="margin-top: 0.5rem;">
                     <button @click="addRipple($event); resetApiBase()" class="border small">
                         <i>restart_alt</i>
-                        <span>リセット</span>
+                        <span>{{ t('settings.reset') }}</span>
                     </button>
                 </nav>
             </div>
 
             <div class="settings-item">
-                <h6>情報</h6>
+                <h6>{{ t('settings.info') }}</h6>
                 <p class="small">
                     <i>info</i>
-                    <span>バージョン 2.2.0</span>
+                    <span>{{ t('common.version') }} 2.3.0</span>
                 </p>
                 <p class="small">
                     <i>code</i>
                     <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: var(--primary); text-decoration: none;">
-                        GitHub リポジトリ
+                        {{ t('settings.repository') }}
                     </a>
                 </p>
             </div>
 
             <div class="settings-item">
-                <h6>使用ライブラリ</h6>
+                <h6>{{ t('settings.libraries') }}</h6>
                 <p class="small"><i>check_circle</i> VueUse - 自動メモリ管理</p>
                 <p class="small"><i>check_circle</i> Axios - 信頼性の高いHTTP</p>
                 <p class="small"><i>check_circle</i> DayJS - 日付フォーマット</p>
@@ -338,7 +349,7 @@
             </div>
 
             <nav class="right-align" style="margin-top: 1rem;">
-                <button @click="addRipple($event); showSettingsModal = false" class="primary">閉じる</button>
+                <button @click="addRipple($event); showSettingsModal = false" class="primary">{{ t('common.close') }}</button>
             </nav>
         </dialog>
     </div>
@@ -355,6 +366,8 @@
     <script src="https://unpkg.com/dayjs@1.11.13/dayjs.min.js"></script>
     <script src="https://unpkg.com/dayjs@1.11.13/plugin/duration.js"></script>
     <script src="https://unpkg.com/dayjs@1.11.13/plugin/relativeTime.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.13/locale/ja.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.13/locale/en.js"></script>
     <script src="https://unpkg.com/dompurify@3.2.2/dist/purify.min.js"></script>
     <script src="https://unpkg.com/reconnecting-websocket@4.4.0/dist/reconnecting-websocket-iife.min.js"></script>
     
@@ -362,7 +375,7 @@
         // Initialize dayjs plugins
         dayjs.extend(window.dayjs_plugin_duration)
         dayjs.extend(window.dayjs_plugin_relativeTime)
-        dayjs.locale('ja')
+        // Default locale will be set by app.js
     </script>
     
     <!-- Application JavaScript -->
