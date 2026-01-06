@@ -230,9 +230,9 @@ main.responsive {
     opacity: 1;
 }
 
-/* Download Progress Footer */
+/* Download Progress Footer - Fixed to bottom */
 footer {
-    position: absolute;
+    position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
@@ -243,22 +243,55 @@ footer {
 }
 
 footer nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.5rem 1rem;
+}
+
+footer nav > button {
+    flex-shrink: 0;
 }
 
 .progress-info {
     display: flex;
     flex-direction: column;
     flex: 1;
-    margin: 0 1rem;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .progress-text {
     font-size: 0.9rem;
     margin-bottom: 4px;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+    position: relative;
+    height: 1.2em;
+}
+
+.progress-text strong {
+    display: inline-block;
+    white-space: nowrap;
+}
+
+/* Marquee animation for long titles */
+@keyframes marquee {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-50%);
+    }
+}
+
+.progress-text.overflow strong {
+    animation: marquee 12s linear infinite;
+    padding-right: 2rem;
+}
+
+.progress-text.overflow strong::after {
+    content: attr(data-text);
+    padding-left: 2rem;
 }
 
 .progress-bar {
