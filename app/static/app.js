@@ -96,7 +96,24 @@ createApp({
         // Reactive state - Granular refs for better performance
         const url = ref('')
         const loading = ref(false)
+        
+        // Error state for Modal
         const error = ref(null)
+        const showErrorModal = ref(false)
+        
+        // Helper to trigger error modal
+        const triggerError = (msg) => {
+            error.value = msg
+            showErrorModal.value = true
+        }
+
+        const closeErrorModal = () => {
+            showErrorModal.value = false
+            // Optional: clear error after animation
+            setTimeout(() => {
+                error.value = null
+            }, 300)
+        }
         
         // Video info - split into granular refs to minimize re-renders
         const infoTitle = ref('')
@@ -247,9 +264,13 @@ createApp({
         const pasteFromClipboard = async () => {
             try {
                 const text = await navigator.clipboard.readText()
+                if (!text) {
+                    triggerError('クリップボードが空です')
+                    return
+                }
                 url.value = text
             } catch (e) {
-                error.value = 'クリップボードからの読み取りに失敗しました'
+                triggerError('クリップボードからの読み取りに失敗しました')
             }
         }
 
@@ -296,7 +317,7 @@ createApp({
                 
             } catch (e) {
                 if (e.name !== 'AbortError') {
-                    error.value = e.message
+                    triggerError(e.message)
                 }
             } finally {
                 loading.value = false
@@ -378,6 +399,9 @@ createApp({
                     } else if (data.status === 'cancelled' || data.status === 'error') {
                         setTimeout(() => {
                             resetProgress()
+                            if (data.status === 'error') {
+                                triggerError(data.message || 'ダウンロード中にエラーが発生しました')
+                            }
                         }, 2000)
                     }
                 } catch (e) {
@@ -487,7 +511,7 @@ createApp({
                 
                 connectWebSocket(response.data.task_id)
             } catch (e) {
-                error.value = e.message
+                triggerError(e.message)
                 downloading.value = false
                 resetProgress()
             }
@@ -545,7 +569,9 @@ createApp({
             // API Base URL management
             apiBaseUrl, defaultApiBase, saveApiBase, resetApiBase,
             // Disconnected toast
-            showDisconnectedToast, isMobileOrTablet
+            showDisconnectedToast, isMobileOrTablet,
+            // Error Modal
+            showErrorModal, closeErrorModal
         }
     }
 }).mount('#app')
