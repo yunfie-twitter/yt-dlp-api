@@ -2,7 +2,7 @@
 
 :root {
     --bottom-nav-height: 80px;
-    --download-footer-reserve: 96px;
+    --download-footer-height: 68px;
 }
 
 /* 1. Remove shadows from settings items */
@@ -155,7 +155,7 @@ main.responsive {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden; /* Prevent horizontal scroll */
-    padding-bottom: calc(var(--download-footer-reserve) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--download-footer-height) + 16px + env(safe-area-inset-bottom));
     -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
 }
 
@@ -235,8 +235,9 @@ main.responsive {
     opacity: 1;
 }
 
-/* Download Progress Footer */
+/* Download Progress Footer - Redesigned Compact Layout */
 footer.download-footer {
+    position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
@@ -246,70 +247,30 @@ footer.download-footer {
     z-index: 25;
 }
 
-footer.download-footer .footer-row {
+/* Main row: Icon | Progress Bar + Stats | Close Button */
+footer.download-footer .progress-row {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.75rem 1rem 0.55rem;
+    padding: 0.65rem 1rem;
 }
 
-footer.download-footer .footer-row > button {
+footer.download-footer .progress-row > button {
     flex-shrink: 0;
 }
 
-footer.download-footer .progress-info {
-    display: flex;
-    flex-direction: column;
+footer.download-footer .progress-container {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-}
-
-footer.download-footer .progress-text {
-    font-size: 0.9rem;
-    margin-bottom: 6px;
-    overflow: hidden;
-    position: relative;
-    height: 1.2em;
-}
-
-footer.download-footer .progress-text strong {
-    display: inline-block;
-    white-space: nowrap;
-}
-
-/* Marquee animation for long titles */
-@keyframes marquee {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
-}
-
-footer.download-footer .progress-text.overflow strong {
-    animation: marquee 12s linear infinite;
-    padding-right: 2rem;
-}
-
-footer.download-footer .progress-text.overflow strong::after {
-    content: attr(data-text);
-    padding-left: 2rem;
-}
-
-footer.download-footer .progress-stats {
     display: flex;
-    gap: 8px;
-    font-size: 0.75rem;
-    color: var(--on-surface-variant);
-    margin-top: 2px;
-}
-
-footer.download-footer .footer-bar {
-    width: 100%;
+    flex-direction: column;
+    gap: 3px;
 }
 
 footer.download-footer .progress-bar {
-    height: 4px;
+    height: 6px;
     background: var(--surface-variant);
-    border-radius: 0;
+    border-radius: 3px;
     overflow: hidden;
     width: 100%;
 }
@@ -318,6 +279,26 @@ footer.download-footer .progress-bar-fill {
     height: 100%;
     background: var(--primary);
     transition: width 0.3s ease;
+}
+
+/* Stats row: Percentage + Message (below bar, inline) */
+footer.download-footer .progress-stats {
+    display: flex;
+    gap: 6px;
+    font-size: 0.7rem;
+    color: var(--on-surface-variant);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+footer.download-footer .progress-stats > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+
+footer.download-footer .progress-stats > span:first-child {
+    flex-shrink: 0;
 }
 
 /* Mobile Styles */
@@ -371,7 +352,7 @@ footer.download-footer .progress-bar-fill {
     }
 
     main.responsive {
-        padding-bottom: calc(var(--bottom-nav-height) + var(--download-footer-reserve) + env(safe-area-inset-bottom));
+        padding-bottom: calc(var(--bottom-nav-height) + var(--download-footer-height) + 16px + env(safe-area-inset-bottom));
     }
 
     footer.download-footer {
