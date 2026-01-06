@@ -250,7 +250,7 @@
 
         <!-- Delete Confirmation Dialog -->
         <dialog :class="{ active: showDeleteModal }">
-            <button class="modal-close circle transparent" @click="showDeleteModal = false">
+            <button class="modal-close circle transparent" @click.stop="showDeleteModal = false">
                 <i>close</i>
             </button>
             <h5>履歴を削除</h5>
@@ -263,7 +263,7 @@
 
         <!-- Settings Dialog -->
         <dialog :class="{ active: showSettingsModal }" style="min-width: 400px; max-width: 500px;">
-            <button class="modal-close circle transparent" @click="showSettingsModal = false">
+            <button class="modal-close circle transparent" @click.stop="showSettingsModal = false">
                 <i>close</i>
             </button>
             <h5 style="margin-bottom: 1.5rem;">設定</h5>
