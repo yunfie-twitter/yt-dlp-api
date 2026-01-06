@@ -53,7 +53,18 @@ class SubprocessExecutor:
             raise
 
 class YTDLPCommandBuilder:
-    """Build yt-dlp commands"""
+    """Build yt-dlp commands with aria2c support"""
+    
+    @staticmethod
+    def _add_aria2c_args(cmd: List[str]) -> List[str]:
+        """
+        Add aria2c external downloader arguments for faster downloads
+        """
+        cmd.extend([
+            '--external-downloader', 'aria2c',
+            '--external-downloader-args', 'aria2c:--max-connection-per-server=16 --split=16 --min-split-size=1M --file-allocation=none --console-log-level=warn'
+        ])
+        return cmd
     
     @staticmethod
     def build_info_command(url: str) -> List[str]:
@@ -124,9 +135,19 @@ class YTDLPCommandBuilder:
         url: str,
         format_str: str,
         audio_only: bool,
-        file_format: Optional[str] = None
+        file_format: Optional[str] = None,
+        use_aria2c: bool = True
     ) -> List[str]:
-        """Build command for streaming download"""
+        """
+        Build command for streaming download with aria2c support
+        
+        Args:
+            url: Video URL
+            format_str: Format selector string
+            audio_only: Whether to extract audio only
+            file_format: Target file format
+            use_aria2c: Use aria2c for faster multi-connection downloads (default: True)
+        """
         cmd = [
             'yt-dlp',
             url,
@@ -142,6 +163,12 @@ class YTDLPCommandBuilder:
         
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
+        
+        # Add aria2c for faster downloads (except for stdout streaming)
+        # Note: aria2c doesn't work well with stdout (-o -), so only use for file downloads
+        # This is handled in download.py where we download to temp files
+        if use_aria2c:
+            cmd = YTDLPCommandBuilder._add_aria2c_args(cmd)
         
         # Ensure progress is suppressed to keep stdout clean
         cmd.append('--no-progress')

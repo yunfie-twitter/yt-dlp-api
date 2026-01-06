@@ -17,9 +17,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 必要なランタイムパッケージ
+# 必要なランタイムパッケージ + aria2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    aria2 \
     curl \
     unzip \
     ca-certificates \
@@ -55,6 +56,9 @@ RUN chown -R appuser:appuser /app
 # Denoキャッシュディレクトリ
 ENV DENO_DIR=/home/appuser/.cache/deno
 RUN mkdir -p $DENO_DIR && chown -R appuser:appuser /home/appuser/.cache
+
+# aria2 設定用ディレクトリ
+RUN mkdir -p /home/appuser/.aria2 && chown -R appuser:appuser /home/appuser/.aria2
 
 USER appuser
 

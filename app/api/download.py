@@ -42,13 +42,14 @@ websocket_connections: Dict[str, list] = {}
 
 class DownloadService:
     """
-    Video download service with progress tracking
+    Video download service with progress tracking and aria2c support
     """
     
     @staticmethod
     async def download_with_progress(intent: DownloadIntent, locale: str, request: Request, task_id: str) -> tuple[str, str, int]:
         """
         Download to temp file with WebSocket progress updates.
+        Uses aria2c for faster multi-connection downloads.
         Returns (file_path, filename, file_size)
         """
         _ = functools.partial(i18n.get, locale=locale)
@@ -129,12 +130,13 @@ class DownloadService:
         temp_id = str(uuid.uuid4())
         temp_path_template = os.path.join(TEMP_DIR, f"{temp_id}.%(ext)s")
         
-        # 4. Build Download Command
+        # 4. Build Download Command with aria2c
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
             intent.audio_only,
-            intent.file_format
+            intent.file_format,
+            use_aria2c=True  # Enable aria2c for faster downloads
         )
         
         try:
@@ -147,7 +149,7 @@ class DownloadService:
         cmd = [c for c in cmd if c != '--no-progress']
         cmd.extend(['--newline', '--progress'])
         
-        log_info(request, f"Starting download to temp: {temp_path_template}")
+        log_info(request, f"Starting download with aria2c to temp: {temp_path_template}")
         
         download_tasks[task_id]['status'] = 'downloading'
         download_tasks[task_id]['filename'] = filename
@@ -156,7 +158,7 @@ class DownloadService:
             'status': 'downloading',
             'progress': 40,
             'filename': filename,
-            'message': 'ダウンロード中...'
+            'message': 'ダウンロード中... (aria2c: 16接続)'
         })
         
         process = await asyncio.create_subprocess_exec(
