@@ -223,6 +223,7 @@ createApp({
         const currentPage = ref('home')
         const showDeleteModal = ref(false)
         const showSettingsModal = ref(false)
+        const showCancelModal = ref(false) // New: Cancel confirmation modal
 
         // VueUse: LocalStorage for history (auto-sync)
         const history = useStorage('downloadHistory', [])
@@ -497,18 +498,19 @@ createApp({
                             progressEta.value = data.eta
                         }
                         
+                        // CHANGED: Don't auto-dismiss on completion - let user manually close
                         if (data.status === 'completed') {
                             setTimeout(() => {
                                 triggerBrowserDownload(taskId)
                             }, 500)
-                        } else if (data.status === 'cancelled' || data.status === 'error') {
+                        } else if (data.status === 'error') {
+                            // Only auto-hide on error (not on cancellation)
                             setTimeout(() => {
                                 resetProgress()
-                                if (data.status === 'error') {
-                                    triggerError(data.message || t('messages.download_error'))
-                                }
+                                triggerError(data.message || t('messages.download_error'))
                             }, 2000)
                         }
+                        // REMOVED: auto-dismiss on 'cancelled' status
                     } catch (e) {
                         console.error('WebSocket message parse error:', e)
                     }
@@ -580,7 +582,7 @@ createApp({
             
             setTimeout(() => {
                 document.body.removeChild(a)
-                resetProgress()
+                // Don't auto-reset - let user manually close the progress bar
                 
                 if (info.value) {
                     saveToHistory({
@@ -592,21 +594,32 @@ createApp({
             }, 1000)
         }
 
+        // NEW: Show cancel confirmation dialog
+        const confirmCancelDownload = () => {
+            showCancelModal.value = true
+        }
+
+        // UPDATED: Actually cancel the download
         const cancelDownload = async () => {
             if (!currentTaskId.value) return
             
+            showCancelModal.value = false // Close confirmation dialog
             progressStatus.value = 'cancelling'
             progressMessage.value = t('messages.cancelling')
             
             try {
                 await api.post(`/download/cancel/${currentTaskId.value}`)
                 console.log('Download cancelled')
+                // Don't auto-reset - let user see "Cancelled" message and close manually
             } catch (e) {
                 console.error('Cancel error:', e)
-                setTimeout(() => {
-                    resetProgress()
-                }, 2000)
+                triggerError(t('messages.cancel_failed'))
             }
+        }
+
+        // NEW: Close progress bar (after completion or cancellation)
+        const closeProgressBar = () => {
+            resetProgress()
         }
 
         const download = async () => {
@@ -695,9 +708,9 @@ createApp({
         // Return public API
         return {
             url, info, loading, downloading, error, selectedQuality,
-            currentPage, showDeleteModal, showSettingsModal, history, isDarkMode, downloadProgress,
+            currentPage, showDeleteModal, showSettingsModal, showCancelModal, history, isDarkMode, downloadProgress,
             availableQualities, currentTaskId, hasInfo,
-            fetchInfo: fetchInfoImmediate, formatDuration, download, cancelDownload, navigateToPage,
+            fetchInfo: fetchInfoImmediate, formatDuration, download, cancelDownload, confirmCancelDownload, closeProgressBar, navigateToPage,
             pasteFromClipboard, confirmClearHistory, clearHistory, deleteHistoryItem, loadFromHistory, 
             toggleTheme, toggleThemeManual, addRipple, formatTimestamp, formatRelativeTime,
             // API Base URL management
