@@ -168,8 +168,17 @@
                 <div class="space"></div>
             </main>
 
-            <!-- Download Progress Footer (Compact Redesign) -->
+            <!-- Download Progress Footer (3-Row Layout) -->
             <footer v-if="downloadProgress" class="download-footer">
+                <!-- Title Row -->
+                <div class="title-row">
+                    <div class="title-spacer"></div>
+                    <div class="download-title">
+                        {{ downloadProgress.filename || info?.title || '' }}
+                    </div>
+                </div>
+
+                <!-- Progress Bar Row -->
                 <div class="progress-row">
                     <!-- Status Icon -->
                     <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
@@ -182,16 +191,10 @@
                         <i>downloading</i>
                     </button>
 
-                    <!-- Progress Bar + Stats -->
-                    <div class="progress-container">
+                    <!-- Progress Bar -->
+                    <div class="progress-bar-container">
                         <div class="progress-bar">
                             <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
-                        </div>
-                        <div class="progress-stats">
-                            <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
-                            <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
-                            <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
-                            <span v-if="downloadProgress.message" style="flex-shrink: 1;">・ {{ downloadProgress.message }}</span>
                         </div>
                     </div>
 
@@ -204,6 +207,14 @@
                         title="キャンセル">
                         <i>close</i>
                     </button>
+                </div>
+
+                <!-- Stats Row -->
+                <div class="stats-row">
+                    <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
+                    <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
+                    <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
+                    <span v-if="downloadProgress.message" class="stats-message">・ {{ downloadProgress.message }}</span>
                 </div>
             </footer>
         </div>
