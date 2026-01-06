@@ -21,6 +21,50 @@
     z-index: 10000;
 }
 
+/* Setup Wizard Overlay */
+.setup-wizard-container {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.setup-wizard {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-radius: 24px;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.2);
+    padding: 2rem;
+    margin: 1rem;
+    z-index: 10002;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.wizard-step {
+    animation: fade-in-up 0.4s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* 1. Remove shadows from settings items */
 .settings-item {
     margin-bottom: 1rem;
@@ -113,11 +157,11 @@ footer.download-footer {
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--surface-container-highest);
     border-top: 1px solid var(--outline-variant);
-    z-index: 0;
+    z-index: 50;
     height: var(--download-footer-height);
     display: flex;
-    align-items: center;
-    padding-left: 6rem;
+    align-items: center; /* Vertically center the main row */
+    padding-left: 1.5rem;
     padding-right: 1.5rem;
 }
 
