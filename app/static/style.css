@@ -159,3 +159,42 @@ dialog h6 {
     overflow:hidden;
     text-overflow:ellipsis;
 }
+/* History Thumbnails 修正版 */
+.history-thumbnail {
+    width: 100px;       /* 標準PCサイズ */
+    max-width: 120px;   /* これ以上大きくならない */
+    height: auto;       /* アスペクト比維持 */
+    max-height: 90px;   /* 高さ上限 */
+    object-fit: cover;
+    border-radius: 8px;
+    margin-right: 1rem;
+    transition: transform 200ms cubic-bezier(0.4,0,0.2,1);
+}
+
+.history-item:hover .history-thumbnail {
+    transform: scale(1.01);
+}
+
+/* タブレット用サイズ調整 */
+@media (min-width:769px) and (max-width:1024px){
+    .history-thumbnail {
+        width: 100px;
+        max-height: 75px;
+    }
+}
+
+/* モバイル用サイズ調整 */
+@media (max-width:768px){
+    .history-thumbnail {
+        width: 80px;
+        max-height: 60px;
+    }
+}
+
+@media (max-width:360px){
+    .history-thumbnail {
+        width: 70px;
+        max-height: 55px;
+    }
+}
+
