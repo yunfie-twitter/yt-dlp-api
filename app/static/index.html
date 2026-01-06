@@ -10,230 +10,16 @@
     <link href="style.css" rel="stylesheet">
 </head>
 <body class="dark">
-    <div id="app" style="display: flex; width: 100%; height: 100%;" v-if="!isLocalesLoading">
-        <!-- Rail Navigation -->
-        <div class="rail-nav">
-            <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
-                <i>home</i>
-                <span>{{ t('common.home') }}</span>
-            </a>
-            <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
-                <i>history</i>
-                <span>{{ t('common.history') }}</span>
-            </a>
-            <div style="flex: 1;"></div>
-            <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
-                <i>code</i>
-                <span>{{ t('common.github') }}</span>
-            </a>
-            <a @click="toggleThemeManual">
-                <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
-                <span>{{ t('common.theme') }}</span>
-            </a>
+    <div id="app" class="app-root">
+        <!-- App Loading (Locales) -->
+        <div v-if="isLocalesLoading" class="app-loading">
+            <progress class="circle wavy large"></progress>
         </div>
 
-        <!-- Main Container -->
-        <div class="main-container">
-            <!-- Header -->
-            <header>
-                <nav>
-                    <h6 class="max">yt-dlp Web Client</h6>
-                    <button class="circle transparent" @click="showSettingsModal = true">
-                        <i>settings</i>
-                    </button>
-                </nav>
-            </header>
-
-            <main class="responsive">
-                <div class="space"></div>
-
-                <!-- Home Page -->
-                <div v-if="currentPage === 'home'" class="page-enter-active">
-                    <article class="border">
-                        <div class="padding">
-                            <h6>{{ t('home.title') }}</h6>
-                            <div class="field label border">
-                                <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
-                                <label>{{ t('home.placeholder') }}</label>
-                            </div>
-                            <nav class="right-align">
-                                <button @click="addRipple($event); pasteFromClipboard()" :disabled="loading" class="primary">
-                                    <i>content_paste</i>
-                                    <span>{{ t('home.paste') }}</span>
-                                </button>
-                                <button @click="addRipple($event); fetchInfo()" :disabled="loading || !url" class="primary">
-                                    <i>search</i>
-                                    <span>{{ t('home.analyze') }}</span>
-                                    <progress v-if="loading" class="circle small download-progress"></progress>
-                                </button>
-                            </nav>
-                        </div>
-                    </article>
-
-                    <article v-if="info" class="border video-info-card">
-                        <div class="grid">
-                            <div class="s12 m4">
-                                <div class="thumbnail-container">
-                                    <img :src="info.thumbnail" :alt="info.title">
-                                    <div class="thumbnail-overlay" v-if="info.duration">
-                                        {{ formatDuration(info.duration) }}
-                                    </div>
-                                    <div class="thumbnail-overlay" v-else>
-                                        {{ t('home.live') }}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="s12 m8">
-                                <div class="padding">
-                                    <h6 class="small">{{ info.title }}</h6>
-                                    <div class="video-meta">
-                                        <i>person</i>
-                                        <span>{{ info.uploader || t('home.unknown_uploader') }}</span>
-                                    </div>
-                                    <div class="video-meta">
-                                        <i>visibility</i>
-                                        <span>{{ info.view_count?.toLocaleString() || '0' }} {{ t('home.views') }}</span>
-                                    </div>
-
-                                    <div class="field suffix border quality-selector">
-                                        <select v-model="selectedQuality">
-                                            <option value="">{{ t('home.best_quality') }}</option>
-                                            <option v-for="quality in availableQualities" :key="quality" :value="quality">{{ quality }}p</option>
-                                            <option value="audio">{{ t('home.audio_only') }}</option>
-                                        </select>
-                                        <i>high_quality</i>
-                                    </div>
-
-                                    <nav>
-                                        <button @click="addRipple($event); download()" :disabled="downloading" class="responsive primary">
-                                            <i>download</i>
-                                            <span>{{ t('home.download') }}</span>
-                                            <progress v-if="downloading" class="circle small download-progress"></progress>
-                                        </button>
-                                    </nav>
-                                </div>
-                            </div>
-                        </div>
-                    </article>
-                </div>
-
-                <!-- History Page -->
-                <div v-if="currentPage === 'history'" class="page-enter-active">
-                    <article class="border">
-                        <div class="padding">
-                            <div class="row">
-                                <h5 class="max">{{ t('history.title') }}</h5>
-                                <button @click="addRipple($event); confirmClearHistory()" class="primary" :disabled="history.length === 0">
-                                    <i>delete_sweep</i>
-                                    <span>{{ t('history.clear') }}</span>
-                                </button>
-                            </div>
-                        </div>
-                    </article>
-
-                    <div v-if="history.length === 0" class="padding">
-                        <article class="border center-align">
-                            <div class="padding">
-                                <i class="extra">history</i>
-                                <p>{{ t('history.empty') }}</p>
-                                <button @click="addRipple($event); navigateToPage('home')" class="primary">
-                                    <i>home</i>
-                                    <span>{{ t('history.back_home') }}</span>
-                                </button>
-                            </div>
-                        </article>
-                    </div>
-
-                    <article v-else v-for="(item, index) in history" :key="index" class="border history-item">
-                        <div class="row padding" @click="loadFromHistory(item)">
-                            <img :src="item.thumbnail" class="history-thumbnail" :alt="item.title">
-                            <div class="max">
-                                <p class="bold">{{ item.title }}</p>
-                                <p class="small">
-                                    <i>person</i>
-                                    {{ item.uploader }}
-                                </p>
-                                <p class="small">
-                                    <i>schedule</i>
-                                    {{ formatTimestamp(item.timestamp) }}
-                                </p>
-                            </div>
-                            <button @click.stop="addRipple($event); deleteHistoryItem(index)" class="circle transparent history-delete">
-                                <i>delete</i>
-                            </button>
-                        </div>
-                    </article>
-                </div>
-
-                <div class="space"></div>
-            </main>
-
-            <!-- Download Progress Footer (3-Column Balanced Layout) -->
-            <footer v-if="downloadProgress" class="download-footer">
-                <div class="footer-grid">
-                    <!-- Column 1: Icon (Left Anchor) -->
-                    <div class="icon-col">
-                        <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
-                            <i class="green-text">check_circle</i>
-                        </button>
-                        <button class="circle transparent" v-else-if="downloadProgress.status === 'downloading'">
-                            <progress class="circle small"></progress>
-                        </button>
-                        <button class="circle transparent" v-else>
-                            <i>downloading</i>
-                        </button>
-                    </div>
-
-                    <!-- Column 2: Content (Center Main) -->
-                    <div class="content-col">
-                        <!-- Title -->
-                        <div class="download-title">
-                            {{ downloadProgress.filename || info?.title || '' }}
-                        </div>
-                        
-                        <!-- Progress Bar -->
-                        <div class="progress-bar-container">
-                            <div class="progress-bar">
-                                <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
-                            </div>
-                        </div>
-
-                        <!-- Stats -->
-                        <div class="stats-row">
-                            <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
-                            <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
-                            <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
-                            <span v-if="downloadProgress.message" class="stats-message">・ {{ downloadProgress.message }}</span>
-                        </div>
-                    </div>
-
-                    <!-- Column 3: Action Button (Right Anchor) -->
-                    <div class="action-col">
-                        <!-- During download: cancel icon -->
-                        <button 
-                            v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
-                            @click="addRipple($event); confirmCancelDownload()" 
-                            class="circle transparent"
-                            :disabled="downloadProgress.status === 'cancelling'"
-                            :title="t('common.cancel')">
-                            <i>cancel</i>
-                        </button>
-                        <!-- After completion or cancellation: close icon -->
-                        <button 
-                            v-else
-                            @click="addRipple($event); closeProgressBar()" 
-                            class="circle transparent"
-                            :title="t('common.close')">
-                            <i>close</i>
-                        </button>
-                    </div>
-                </div>
-            </footer>
-        </div>
-
-        <!-- Bottom Navigation (Mobile) -->
-        <div class="bottom-nav">
-            <nav>
+        <!-- App Content -->
+        <div v-else style="display: flex; width: 100%; height: 100%;">
+            <!-- Rail Navigation -->
+            <div class="rail-nav">
                 <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
                     <i>home</i>
                     <span>{{ t('common.home') }}</span>
@@ -242,6 +28,7 @@
                     <i>history</i>
                     <span>{{ t('common.history') }}</span>
                 </a>
+                <div style="flex: 1;"></div>
                 <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
                     <i>code</i>
                     <span>{{ t('common.github') }}</span>
@@ -250,143 +37,364 @@
                     <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
                     <span>{{ t('common.theme') }}</span>
                 </a>
-            </nav>
-        </div>
-
-        <!-- Connection Toast -->
-        <div v-if="showDisconnectedToast" :class="['conn-toast', isMobileOrTablet() ? 'mobile' : 'desktop']">
-            <i>cloud_off</i>
-            <span>{{ t('messages.disconnected') }}</span>
-        </div>
-
-        <!-- Modal Overlays -->
-        <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
-        <div class="modal-overlay" :class="{ active: showCancelModal }" @click="showCancelModal = false"></div>
-        <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
-        <div class="modal-overlay" :class="{ active: showErrorModal }" @click="closeErrorModal"></div>
-
-        <!-- Delete Confirmation Dialog -->
-        <dialog :class="{ active: showDeleteModal }">
-            <button class="modal-close circle transparent" @click.stop="showDeleteModal = false">
-                <i>close</i>
-            </button>
-            <h5>{{ t('history.confirm_title') }}</h5>
-            <p>{{ t('history.confirm_message') }}</p>
-            <nav class="right-align">
-                <button @click="addRipple($event); showDeleteModal = false" class="border">{{ t('common.cancel') }}</button>
-                <button @click="addRipple($event); clearHistory()" class="primary">{{ t('common.delete') }}</button>
-            </nav>
-        </dialog>
-
-        <!-- Cancel Download Confirmation Dialog -->
-        <dialog :class="{ active: showCancelModal }">
-            <button class="modal-close circle transparent" @click.stop="showCancelModal = false">
-                <i>close</i>
-            </button>
-            <h5>{{ t('download.cancel_title') }}</h5>
-            <p>{{ t('download.cancel_message') }}</p>
-            <nav class="right-align">
-                <button @click="addRipple($event); showCancelModal = false" class="border">{{ t('common.back') }}</button>
-                <button @click="addRipple($event); cancelDownload()" class="primary">{{ t('common.cancel') }}</button>
-            </nav>
-        </dialog>
-
-        <!-- Error Dialog -->
-        <dialog :class="{ active: showErrorModal }" class="error-dialog">
-            <button class="modal-close circle transparent" @click.stop="closeErrorModal">
-                <i>close</i>
-            </button>
-            <h5 class="red-text">
-                <i>error</i>
-                {{ t('common.error') }}
-            </h5>
-            <p>{{ error }}</p>
-            <nav class="right-align">
-                <button @click="addRipple($event); closeErrorModal()" class="primary">{{ t('common.close') }}</button>
-            </nav>
-        </dialog>
-
-        <!-- Settings Dialog -->
-        <dialog :class="{ active: showSettingsModal }" style="min-width: 400px; max-width: 500px;">
-            <button class="modal-close circle transparent" @click.stop="showSettingsModal = false">
-                <i>close</i>
-            </button>
-            <h5 style="margin-bottom: 1.5rem;">{{ t('common.settings') }}</h5>
-            
-            <div class="settings-item">
-                <h6>{{ t('settings.language') }}</h6>
-                <div class="field suffix border" style="margin-top: 0.5rem;">
-                    <select :value="currentLocale" @change="changeLanguage($event.target.value)">
-                        <option value="ja">日本語</option>
-                        <option value="en">English</option>
-                    </select>
-                    <i>language</i>
-                </div>
-                <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_language') }}</p>
             </div>
 
-            <div class="settings-item">
-                <div class="row">
-                    <div class="max">
-                        <h6>{{ t('settings.appearance') }}</h6>
-                        <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_theme') }}</p>
+            <!-- Main Container -->
+            <div class="main-container">
+                <!-- Header -->
+                <header>
+                    <nav>
+                        <h6 class="max">yt-dlp Web Client</h6>
+                        <button class="circle transparent" @click="showSettingsModal = true">
+                            <i>settings</i>
+                        </button>
+                    </nav>
+                </header>
+
+                <main class="responsive">
+                    <div class="space"></div>
+
+                    <!-- Home Page -->
+                    <div v-if="currentPage === 'home'" class="page-enter-active">
+                        <article class="border">
+                            <div class="padding">
+                                <h6>{{ t('home.title') }}</h6>
+                                <div class="field label border">
+                                    <input v-model="url" @keyup.enter="fetchInfo" type="text" :disabled="loading">
+                                    <label>{{ t('home.placeholder') }}</label>
+                                </div>
+                                <nav class="right-align">
+                                    <button @click="addRipple($event); pasteFromClipboard()" :disabled="loading" class="primary">
+                                        <i>content_paste</i>
+                                        <span>{{ t('home.paste') }}</span>
+                                    </button>
+                                    <button @click="addRipple($event); fetchInfo()" :disabled="loading || !url" class="primary">
+                                        <i>search</i>
+                                        <span>{{ t('home.analyze') }}</span>
+                                        <progress v-if="loading" class="circle small download-progress"></progress>
+                                    </button>
+                                </nav>
+                            </div>
+                        </article>
+
+                        <article v-if="info" class="border video-info-card">
+                            <div class="grid">
+                                <div class="s12 m4">
+                                    <div class="thumbnail-container">
+                                        <img :src="info.thumbnail" :alt="info.title">
+                                        <div class="thumbnail-overlay" v-if="info.duration">
+                                            {{ formatDuration(info.duration) }}
+                                        </div>
+                                        <div class="thumbnail-overlay" v-else>
+                                            {{ t('home.live') }}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="s12 m8">
+                                    <div class="padding">
+                                        <h6 class="small">{{ info.title }}</h6>
+                                        <div class="video-meta">
+                                            <i>person</i>
+                                            <span>{{ info.uploader || t('home.unknown_uploader') }}</span>
+                                        </div>
+                                        <div class="video-meta">
+                                            <i>visibility</i>
+                                            <span>{{ info.view_count?.toLocaleString() || '0' }} {{ t('home.views') }}</span>
+                                        </div>
+
+                                        <div class="field suffix border quality-selector">
+                                            <select v-model="selectedQuality">
+                                                <option value="">{{ t('home.best_quality') }}</option>
+                                                <option v-for="quality in availableQualities" :key="quality" :value="quality">{{ quality }}p</option>
+                                                <option value="audio">{{ t('home.audio_only') }}</option>
+                                            </select>
+                                            <i>high_quality</i>
+                                        </div>
+
+                                        <nav>
+                                            <button @click="addRipple($event); download()" :disabled="downloading" class="responsive primary">
+                                                <i>download</i>
+                                                <span>{{ t('home.download') }}</span>
+                                                <progress v-if="downloading" class="circle small download-progress"></progress>
+                                            </button>
+                                        </nav>
+                                    </div>
+                                </div>
+                            </div>
+                        </article>
                     </div>
-                    <label class="switch">
-                        <input type="checkbox" :checked="isDarkMode" @change="toggleTheme">
-                        <span></span>
-                    </label>
-                </div>
-                <p class="small">
-                    <i>{{ isDarkMode ? 'dark_mode' : 'light_mode' }}</i>
-                    <span>{{ isDarkMode ? t('settings.dark_mode') : t('settings.light_mode') }}</span>
-                </p>
+
+                    <!-- History Page -->
+                    <div v-if="currentPage === 'history'" class="page-enter-active">
+                        <article class="border">
+                            <div class="padding">
+                                <div class="row">
+                                    <h5 class="max">{{ t('history.title') }}</h5>
+                                    <button @click="addRipple($event); confirmClearHistory()" class="primary" :disabled="history.length === 0">
+                                        <i>delete_sweep</i>
+                                        <span>{{ t('history.clear') }}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </article>
+
+                        <div v-if="history.length === 0" class="padding">
+                            <article class="border center-align">
+                                <div class="padding">
+                                    <i class="extra">history</i>
+                                    <p>{{ t('history.empty') }}</p>
+                                    <button @click="addRipple($event); navigateToPage('home')" class="primary">
+                                        <i>home</i>
+                                        <span>{{ t('history.back_home') }}</span>
+                                    </button>
+                                </div>
+                            </article>
+                        </div>
+
+                        <article v-else v-for="(item, index) in history" :key="index" class="border history-item">
+                            <div class="row padding" @click="loadFromHistory(item)">
+                                <img :src="item.thumbnail" class="history-thumbnail" :alt="item.title">
+                                <div class="max">
+                                    <p class="bold">{{ item.title }}</p>
+                                    <p class="small">
+                                        <i>person</i>
+                                        {{ item.uploader }}
+                                    </p>
+                                    <p class="small">
+                                        <i>schedule</i>
+                                        {{ formatTimestamp(item.timestamp) }}
+                                    </p>
+                                </div>
+                                <button @click.stop="addRipple($event); deleteHistoryItem(index)" class="circle transparent history-delete">
+                                    <i>delete</i>
+                                </button>
+                            </div>
+                        </article>
+                    </div>
+
+                    <div class="space"></div>
+                </main>
+
+                <!-- Download Progress Footer (3-Column Balanced Layout) -->
+                <footer v-if="downloadProgress" class="download-footer">
+                    <div class="footer-grid">
+                        <!-- Column 1: Icon (Left Anchor) -->
+                        <div class="icon-col">
+                            <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
+                                <i class="green-text">check_circle</i>
+                            </button>
+                            <button class="circle transparent" v-else-if="downloadProgress.status === 'downloading'">
+                                <progress class="circle small"></progress>
+                            </button>
+                            <button class="circle transparent" v-else>
+                                <i>downloading</i>
+                            </button>
+                        </div>
+
+                        <!-- Column 2: Content (Center Main) -->
+                        <div class="content-col">
+                            <!-- Title -->
+                            <div class="download-title">
+                                {{ downloadProgress.filename || info?.title || '' }}
+                            </div>
+                            
+                            <!-- Progress Bar -->
+                            <div class="progress-bar-container">
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                                </div>
+                            </div>
+
+                            <!-- Stats -->
+                            <div class="stats-row">
+                                <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
+                                <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
+                                <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
+                                <span v-if="downloadProgress.message" class="stats-message">・ {{ downloadProgress.message }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Column 3: Action Button (Right Anchor) -->
+                        <div class="action-col">
+                            <!-- During download: cancel icon -->
+                            <button 
+                                v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
+                                @click="addRipple($event); confirmCancelDownload()" 
+                                class="circle transparent"
+                                :disabled="downloadProgress.status === 'cancelling'"
+                                :title="t('common.cancel')">
+                                <i>cancel</i>
+                            </button>
+                            <!-- After completion or cancellation: close icon -->
+                            <button 
+                                v-else
+                                @click="addRipple($event); closeProgressBar()" 
+                                class="circle transparent"
+                                :title="t('common.close')">
+                                <i>close</i>
+                            </button>
+                        </div>
+                    </div>
+                </footer>
             </div>
 
-            <div class="settings-item">
-                <h6>{{ t('settings.api_server') }}</h6>
-                <div class="field label border" style="margin-top: 0.5rem;">
-                    <input v-model="apiBaseUrl" @change="saveApiBase" type="text">
-                    <label>{{ t('settings.api_base_url') }}</label>
-                </div>
-                <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">
-                    <i>info</i>
-                    <span>{{ t('settings.default') }}: {{ defaultApiBase }}</span>
-                </p>
-                <nav style="margin-top: 0.5rem;">
-                    <button @click="addRipple($event); resetApiBase()" class="border small">
-                        <i>restart_alt</i>
-                        <span>{{ t('settings.reset') }}</span>
-                    </button>
+            <!-- Bottom Navigation (Mobile) -->
+            <div class="bottom-nav">
+                <nav>
+                    <a @click="navigateToPage('home')" :class="{ active: currentPage === 'home' }">
+                        <i>home</i>
+                        <span>{{ t('common.home') }}</span>
+                    </a>
+                    <a @click="navigateToPage('history')" :class="{ active: currentPage === 'history' }">
+                        <i>history</i>
+                        <span>{{ t('common.history') }}</span>
+                    </a>
+                    <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank">
+                        <i>code</i>
+                        <span>{{ t('common.github') }}</span>
+                    </a>
+                    <a @click="toggleThemeManual">
+                        <i>{{ isDarkMode ? 'light_mode' : 'dark_mode' }}</i>
+                        <span>{{ t('common.theme') }}</span>
+                    </a>
                 </nav>
             </div>
 
-            <div class="settings-item">
-                <h6>{{ t('settings.info') }}</h6>
-                <p class="small">
-                    <i>info</i>
-                    <span>{{ t('common.version') }} 2.3.0</span>
-                </p>
-                <p class="small">
-                    <i>code</i>
-                    <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: var(--primary); text-decoration: none;">
-                        {{ t('settings.repository') }}
-                    </a>
-                </p>
+            <!-- Connection Toast -->
+            <div v-if="showDisconnectedToast" :class="['conn-toast', isMobileOrTablet() ? 'mobile' : 'desktop']">
+                <i>cloud_off</i>
+                <span>{{ t('messages.disconnected') }}</span>
             </div>
 
-            <div class="settings-item">
-                <h6>{{ t('settings.libraries') }}</h6>
-                <p class="small"><i>check_circle</i> VueUse - 自動メモリ管理</p>
-                <p class="small"><i>check_circle</i> Axios - 信頼性の高いHTTP</p>
-                <p class="small"><i>check_circle</i> DayJS - 日付フォーマット</p>
-                <p class="small"><i>check_circle</i> DOMPurify - XSS対策</p>
-                <p class="small"><i>check_circle</i> ReconnectingWebSocket - 自動再接続</p>
-            </div>
+            <!-- Modal Overlays -->
+            <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
+            <div class="modal-overlay" :class="{ active: showCancelModal }" @click="showCancelModal = false"></div>
+            <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
+            <div class="modal-overlay" :class="{ active: showErrorModal }" @click="closeErrorModal"></div>
 
-            <nav class="right-align" style="margin-top: 1rem;">
-                <button @click="addRipple($event); showSettingsModal = false" class="primary">{{ t('common.close') }}</button>
-            </nav>
-        </dialog>
+            <!-- Delete Confirmation Dialog -->
+            <dialog :class="{ active: showDeleteModal }">
+                <button class="modal-close circle transparent" @click.stop="showDeleteModal = false">
+                    <i>close</i>
+                </button>
+                <h5>{{ t('history.confirm_title') }}</h5>
+                <p>{{ t('history.confirm_message') }}</p>
+                <nav class="right-align">
+                    <button @click="addRipple($event); showDeleteModal = false" class="border">{{ t('common.cancel') }}</button>
+                    <button @click="addRipple($event); clearHistory()" class="primary">{{ t('common.delete') }}</button>
+                </nav>
+            </dialog>
+
+            <!-- Cancel Download Confirmation Dialog -->
+            <dialog :class="{ active: showCancelModal }">
+                <button class="modal-close circle transparent" @click.stop="showCancelModal = false">
+                    <i>close</i>
+                </button>
+                <h5>{{ t('download.cancel_title') }}</h5>
+                <p>{{ t('download.cancel_message') }}</p>
+                <nav class="right-align">
+                    <button @click="addRipple($event); showCancelModal = false" class="border">{{ t('common.back') }}</button>
+                    <button @click="addRipple($event); cancelDownload()" class="primary">{{ t('common.cancel') }}</button>
+                </nav>
+            </dialog>
+
+            <!-- Error Dialog -->
+            <dialog :class="{ active: showErrorModal }" class="error-dialog">
+                <button class="modal-close circle transparent" @click.stop="closeErrorModal">
+                    <i>close</i>
+                </button>
+                <h5 class="red-text">
+                    <i>error</i>
+                    {{ t('common.error') }}
+                </h5>
+                <p>{{ error }}</p>
+                <nav class="right-align">
+                    <button @click="addRipple($event); closeErrorModal()" class="primary">{{ t('common.close') }}</button>
+                </nav>
+            </dialog>
+
+            <!-- Settings Dialog -->
+            <dialog :class="{ active: showSettingsModal }" style="min-width: 400px; max-width: 500px;">
+                <button class="modal-close circle transparent" @click.stop="showSettingsModal = false">
+                    <i>close</i>
+                </button>
+                <h5 style="margin-bottom: 1.5rem;">{{ t('common.settings') }}</h5>
+                
+                <div class="settings-item">
+                    <h6>{{ t('settings.language') }}</h6>
+                    <div class="field suffix border" style="margin-top: 0.5rem;">
+                        <select :value="currentLocale" @change="changeLanguage($event.target.value)">
+                            <option value="ja">日本語</option>
+                            <option value="en">English</option>
+                        </select>
+                        <i>language</i>
+                    </div>
+                    <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_language') }}</p>
+                </div>
+
+                <div class="settings-item">
+                    <div class="row">
+                        <div class="max">
+                            <h6>{{ t('settings.appearance') }}</h6>
+                            <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">{{ t('settings.change_theme') }}</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" :checked="isDarkMode" @change="toggleTheme">
+                            <span></span>
+                        </label>
+                    </div>
+                    <p class="small">
+                        <i>{{ isDarkMode ? 'dark_mode' : 'light_mode' }}</i>
+                        <span>{{ isDarkMode ? t('settings.dark_mode') : t('settings.light_mode') }}</span>
+                    </p>
+                </div>
+
+                <div class="settings-item">
+                    <h6>{{ t('settings.api_server') }}</h6>
+                    <div class="field label border" style="margin-top: 0.5rem;">
+                        <input v-model="apiBaseUrl" @change="saveApiBase" type="text">
+                        <label>{{ t('settings.api_base_url') }}</label>
+                    </div>
+                    <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">
+                        <i>info</i>
+                        <span>{{ t('settings.default') }}: {{ defaultApiBase }}</span>
+                    </p>
+                    <nav style="margin-top: 0.5rem;">
+                        <button @click="addRipple($event); resetApiBase()" class="border small">
+                            <i>restart_alt</i>
+                            <span>{{ t('settings.reset') }}</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <div class="settings-item">
+                    <h6>{{ t('settings.info') }}</h6>
+                    <p class="small">
+                        <i>info</i>
+                        <span>{{ t('common.version') }} 2.3.0</span>
+                    </p>
+                    <p class="small">
+                        <i>code</i>
+                        <a href="https://github.com/yunfie-twitter/yt-dlp-api" target="_blank" style="color: var(--primary); text-decoration: none;">
+                            {{ t('settings.repository') }}
+                        </a>
+                    </p>
+                </div>
+
+                <div class="settings-item">
+                    <h6>{{ t('settings.libraries') }}</h6>
+                    <p class="small"><i>check_circle</i> VueUse - 自動メモリ管理</p>
+                    <p class="small"><i>check_circle</i> Axios - 信頼性の高いHTTP</p>
+                    <p class="small"><i>check_circle</i> DayJS - 日付フォーマット</p>
+                    <p class="small"><i>check_circle</i> DOMPurify - XSS対策</p>
+                    <p class="small"><i>check_circle</i> ReconnectingWebSocket - 自動再接続</p>
+                </div>
+
+                <nav class="right-align" style="margin-top: 1rem;">
+                    <button @click="addRipple($event); showSettingsModal = false" class="primary">{{ t('common.close') }}</button>
+                </nav>
+            </dialog>
+        </div>
     </div>
 
     <!-- External JS Libraries (CDN) -->

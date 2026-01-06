@@ -5,7 +5,21 @@
     --download-footer-height: 88px; /* Taller for better vertical rhythm */
 }
 
-/* Existing styles ... (abbreviated for brevity, focusing on footer) */
+/* App Loading Overlay */
+.app-root {
+    width: 100%;
+    height: 100%;
+}
+
+.app-loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    z-index: 10000;
+}
 
 /* 1. Remove shadows from settings items */
 .settings-item {
