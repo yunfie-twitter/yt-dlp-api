@@ -237,7 +237,6 @@ main.responsive {
 
 /* Download Progress Footer - Redesigned Compact Layout */
 footer.download-footer {
-    position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
