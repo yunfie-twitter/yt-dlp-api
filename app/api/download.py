@@ -184,7 +184,8 @@ class DownloadService:
         
         async def parse_progress():
             """
-            Parse yt-dlp progress and broadcast via WebSocket
+            Parse yt-dlp/aria2c progress and broadcast via WebSocket
+            Handles both standard yt-dlp output and aria2c specific output
             """
             nonlocal last_progress_time
             try:
@@ -194,7 +195,11 @@ class DownloadService:
                         break
                     decoded = line.decode().strip()
                     
-                    # Parse: [download]  45.2% of 10.50MiB at 2.30MiB/s ETA 00:03
+                    # Log raw output for debugging (optional, can be verbose)
+                    # print(f"Raw output: {decoded}")
+                    
+                    # Pattern 1: yt-dlp standard output
+                    # [download]  45.2% of 10.50MiB at 2.30MiB/s ETA 00:03
                     if '[download]' in decoded:
                         progress_data = {'status': 'downloading'}
                         
@@ -202,7 +207,7 @@ class DownloadService:
                         percent_match = re.search(r'(\d+\.\d+)%', decoded)
                         if percent_match:
                             percentage = float(percent_match.group(1))
-                            # Scale from 40-95% (40% was info fetching)
+                            # Scale from 40-95%
                             scaled_percentage = 40 + (percentage * 0.55)
                             progress_data['progress'] = round(scaled_percentage, 1)
                             download_tasks[task_id]['progress'] = scaled_percentage
@@ -225,15 +230,54 @@ class DownloadService:
                             eta = eta_match.group(1)
                             progress_data['eta'] = eta
                             download_tasks[task_id]['eta'] = eta
-                        
-                        # Throttle broadcasts (max once per 0.5 seconds)
+                            
+                        # Broadcast update
                         current_time = time.time()
                         if current_time - last_progress_time >= 0.5:
                             await DownloadService.broadcast_progress(task_id, progress_data)
                             last_progress_time = current_time
                             
+                    # Pattern 2: aria2c output (via yt-dlp)
+                    # [#2088b4 24MiB/25MiB(94%) CN:16 DL:12MiB/s ETA:0s]
+                    elif '[#' in decoded and 'CN:' in decoded:
+                        progress_data = {'status': 'downloading'}
+                        
+                        # Extract percentage: (94%)
+                        percent_match = re.search(r'\((\d+)%\)', decoded)
+                        if percent_match:
+                            percentage = float(percent_match.group(1))
+                            # Scale from 40-95%
+                            scaled_percentage = 40 + (percentage * 0.55)
+                            progress_data['progress'] = round(scaled_percentage, 1)
+                            download_tasks[task_id]['progress'] = scaled_percentage
+                            
+                        # Extract size: 24MiB/25MiB
+                        size_match = re.search(r'/([\d.]+[KMG]iB)', decoded)
+                        if size_match:
+                            progress_data['total_size'] = size_match.group(1)
+                            
+                        # Extract speed: DL:12MiB/s
+                        speed_match = re.search(r'DL:([\d.]+[KMG]iB/s)', decoded)
+                        if speed_match:
+                            speed = speed_match.group(1)
+                            progress_data['speed'] = speed
+                            download_tasks[task_id]['speed'] = speed
+                            
+                        # Extract ETA: ETA:0s
+                        eta_match = re.search(r'ETA:(\w+)', decoded)
+                        if eta_match:
+                            eta = eta_match.group(1)
+                            progress_data['eta'] = eta
+                            download_tasks[task_id]['eta'] = eta
+                            
+                        # Broadcast update
+                        current_time = time.time()
+                        if current_time - last_progress_time >= 0.5:
+                            await DownloadService.broadcast_progress(task_id, progress_data)
+                            last_progress_time = current_time
+
                     # Check for "Destination" line (processing)
-                    elif 'Destination:' in decoded or 'Merging' in decoded:
+                    elif 'Destination:' in decoded or 'Merging' in decoded or '[Merger]' in decoded:
                         log_info(request, f"[PROCESSING] Task: {task_id} | Post-processing started")
                         await DownloadService.broadcast_progress(task_id, {
                             'status': 'processing',
