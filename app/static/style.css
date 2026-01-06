@@ -44,20 +44,24 @@
     background: #b71c1c; /* Error red for high visibility */
 }
 
-/* 3. Dialog motion (subtle) */
+/* 3. Dialog motion (subtle) + center alignment */
 dialog {
     z-index: 100;
     box-sizing: border-box;
     max-width: calc(100vw - 24px);
     opacity: 0;
-    transform: translateY(6px);
     transition: opacity 120ms ease, transform 120ms ease;
     pointer-events: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) translateY(6px);
+    margin: 0;
 }
 
 dialog.active {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate(-50%, -50%) translateY(0);
     pointer-events: auto;
 }
 
@@ -262,7 +266,7 @@ footer nav {
     background: var(--surface-variant);
     border-radius: 2px;
     overflow: hidden;
-    width: 200%;
+    width: 100%;
 }
 
 .progress-bar-fill {
@@ -342,6 +346,15 @@ footer nav {
 
     .history-thumbnail {
         width: 80px;
+    }
+
+    /* Make history item text smaller on mobile */
+    .history-item p.bold {
+        font-size: 0.9rem;
+    }
+
+    .history-item p.small {
+        font-size: 0.75rem;
     }
 
     /* Prevent header/button overflow (history clear button, etc.) */
