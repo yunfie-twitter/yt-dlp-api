@@ -1,79 +1,74 @@
 {
-  "common": {
-    "home": "ホーム",
-    "history": "履歴",
-    "github": "GitHub",
-    "theme": "テーマ",
-    "settings": "設定",
-    "cancel": "キャンセル",
-    "delete": "削除",
-    "close": "閉じる",
-    "back": "戻る",
-    "next": "次へ",
-    "finish": "完了",
-    "error": "エラー",
-    "version": "バージョン"
-  },
-  "home": {
-    "title": "動画URLを入力",
-    "placeholder": "YouTubeやその他の動画URLを入力してください",
-    "paste": "貼り付け",
-    "analyze": "解析",
-    "best_quality": "最高画質",
-    "audio_only": "音声のみ (MP3)",
-    "download": "ダウンロード",
-    "views": "回視聴",
-    "unknown_uploader": "不明な投稿者",
-    "live": "ライブ"
-  },
-  "history": {
-    "title": "ダウンロード履歴",
-    "clear": "履歴をクリア",
-    "empty": "まだダウンロード履歴がありません",
-    "back_home": "ホームに戻る",
-    "confirm_title": "履歴を削除しますか？",
-    "confirm_message": "すべてのダウンロード履歴が削除されます。この操作は取り消せません。"
-  },
-  "download": {
-    "cancel_title": "ダウンロードをキャンセルしますか？",
-    "cancel_message": "進行中のダウンロードが中止されます。"
-  },
-  "setup": {
-    "welcome": "ようこそ",
-    "welcome_message": "yt-dlp Web Clientへようこそ！\n初期設定を行いましょう。",
-    "step_language": "言語設定",
-    "step_api": "APIサーバー設定",
-    "language_title": "表示言語を選択",
-    "language_description": "お好みの言語を選んでください",
-    "api_title": "APIサーバーのURL",
-    "api_description": "通常は変更不要です。カスタムサーバーを使用する場合のみ変更してください。",
-    "api_placeholder": "https://example.com",
-    "setup_complete": "セットアップ完了！",
-    "setup_complete_message": "設定が完了しました。\nダウンロードを始めましょう！"
-  },
-  "settings": {
-    "language": "言語",
-    "change_language": "表示言語を変更",
-    "appearance": "外観",
-    "change_theme": "ダークモード/ライトモードを切り替え",
-    "dark_mode": "ダークモード",
-    "light_mode": "ライトモード",
-    "api_server": "APIサーバー",
-    "api_base_url": "APIベースURL",
-    "default": "デフォルト",
-    "reset": "リセット",
-    "info": "情報",
-    "repository": "GitHubリポジトリ",
-    "libraries": "使用ライブラリ"
-  },
-  "messages": {
-    "clipboard_empty": "クリップボードが空です",
-    "clipboard_error": "クリップボードの読み取りに失敗しました",
-    "download_started": "ダウンロードを開始しました",
-    "download_error": "ダウンロード中にエラーが発生しました",
-    "cancelling": "キャンセル中...",
-    "cancel_failed": "キャンセルに失敗しました",
-    "request_failed": "リクエストに失敗しました",
-    "disconnected": "サーバーに接続できません"
-  }
+    "common": {
+        "home": "ホーム",
+        "history": "履歴",
+        "settings": "設定",
+        "theme": "テーマ",
+        "github": "GitHub",
+        "version": "バージョン",
+        "close": "閉じる",
+        "cancel": "キャンセル",
+        "delete": "削除",
+        "error": "エラー",
+        "next": "次へ",
+        "back": "戻る",
+        "finish": "完了"
+    },
+    "home": {
+        "title": "動画をダウンロード",
+        "placeholder": "YouTubeなどのURLを入力...",
+        "paste": "貼り付け",
+        "analyze": "解析",
+        "download": "ダウンロード",
+        "best_quality": "最高画質",
+        "audio_only": "音声のみ (MP3)",
+        "unknown_uploader": "不明なアップロード者",
+        "views": "回視聴",
+        "live": "ライブ配信"
+    },
+    "history": {
+        "title": "ダウンロード履歴",
+        "clear": "履歴を削除",
+        "empty": "履歴はありません",
+        "back_home": "ホームに戻る",
+        "confirm_title": "履歴の削除",
+        "confirm_message": "すべての履歴を削除してもよろしいですか？"
+    },
+    "settings": {
+        "language": "言語設定",
+        "change_language": "表示言語を切り替えます",
+        "appearance": "外観設定",
+        "change_theme": "ダークモードとライトモードを切り替えます",
+        "dark_mode": "ダークモード",
+        "light_mode": "ライトモード",
+        "api_server": "APIサーバー",
+        "api_base_url": "API URL",
+        "default": "デフォルト",
+        "reset": "リセット",
+        "info": "アプリ情報",
+        "repository": "ソースコードを表示",
+        "libraries": "使用ライブラリ"
+    },
+    "setup": {
+        "welcome": "ようこそ",
+        "welcome_message": "初期設定をはじめましょう。\nいくつかの簡単なステップで完了します。",
+        "language_title": "言語の選択",
+        "language_description": "使用する言語を選択してください。",
+        "api_title": "API設定",
+        "api_description": "APIサーバーのURLを設定します。通常は変更する必要はありません。"
+    },
+    "download": {
+        "cancel_title": "ダウンロードのキャンセル",
+        "cancel_message": "本当にダウンロードをキャンセルしますか？"
+    },
+    "messages": {
+        "clipboard_empty": "クリップボードが空です",
+        "clipboard_error": "クリップボードの読み取りに失敗しました",
+        "request_failed": "リクエストが失敗しました",
+        "download_started": "ダウンロードを開始しました...",
+        "download_error": "ダウンロード中にエラーが発生しました",
+        "cancelling": "キャンセル中...",
+        "cancel_failed": "キャンセルに失敗しました",
+        "disconnected": "サーバーとの接続が切断されました"
+    }
 }
