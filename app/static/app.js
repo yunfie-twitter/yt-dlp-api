@@ -1,23 +1,21 @@
 /**
- * yt-dlp Web Client
+ * yt-dlp Web Client - Performance Optimized
  * Modern application with VueUse, axios, dayjs, DOMPurify
- * All libraries loaded via CDN - no Node.js required
+ * Optimizations: granular reactivity, minimal re-renders, cancellable requests
  */
 
-const { createApp, ref, computed, onMounted, watch } = Vue
+const { createApp, ref, computed, onMounted, onUnmounted } = Vue
 const { 
     useStorage, 
-    useWebSocket, 
     useDark, 
     useToggle,
     useClipboard,
-    useDebounceFn,
-    useThrottleFn 
+    useDebounceFn 
 } = VueUse
 
 createApp({
     setup() {
-        // API client with axios
+        // API client with axios (singleton)
         const api = axios.create({
             timeout: 15000,
             headers: { 'Content-Type': 'application/json' }
@@ -33,23 +31,47 @@ createApp({
             }
         )
 
-        // Reactive state
+        // AbortController for cancellable requests
+        let abortController = null
+
+        // Reactive state - Granular refs for better performance
         const url = ref('')
-        const info = ref(null)
         const loading = ref(false)
-        const downloading = ref(false)
         const error = ref(null)
+        
+        // Video info - split into granular refs to minimize re-renders
+        const infoTitle = ref('')
+        const infoUploader = ref('')
+        const infoThumbnail = ref('')
+        const infoViewCount = ref(0)
+        const infoDuration = ref(0)
+        const hasInfo = ref(false)
+        
+        // Available qualities (pre-computed, no re-calculation)
+        const availableQualities = ref([])
+        
+        // Download state
+        const downloading = ref(false)
         const selectedQuality = ref('')
+        const currentTaskId = ref(null)
+        
+        // Progress - granular refs for minimal re-renders
+        const progressStatus = ref(null)
+        const progressValue = ref(0)
+        const progressMessage = ref('')
+        const progressFilename = ref('')
+        const progressSpeed = ref('')
+        const progressEta = ref('')
+        
+        // UI state
         const currentPage = ref('home')
         const showDeleteModal = ref(false)
         const showSettingsModal = ref(false)
-        const downloadProgress = ref(null)
-        const currentTaskId = ref(null)
 
         // VueUse: LocalStorage for history (auto-sync)
         const history = useStorage('downloadHistory', [])
 
-        // VueUse: Dark mode (auto-sync with system preference)
+        // VueUse: Dark mode
         const isDarkMode = useDark({
             selector: 'body',
             attribute: 'class',
@@ -61,18 +83,6 @@ createApp({
         // VueUse: Clipboard
         const { copy, copied, isSupported: clipboardSupported } = useClipboard()
 
-        // Computed properties
-        const availableQualities = computed(() => {
-            if (!info.value || !info.value.formats) return []
-            const qualities = new Set()
-            info.value.formats.forEach(format => {
-                if (format.height && format.vcodec !== 'none') {
-                    qualities.add(format.height)
-                }
-            })
-            return Array.from(qualities).filter(q => [1080, 720, 480].includes(q)).sort((a, b) => b - a)
-        })
-
         // Sanitize user-generated content
         const sanitize = (dirty) => {
             if (!dirty) return ''
@@ -82,18 +92,32 @@ createApp({
             })
         }
 
-        // Format video info safely
-        const safeInfo = computed(() => {
-            if (!info.value) return null
+        // Computed - info object for template compatibility
+        const info = computed(() => {
+            if (!hasInfo.value) return null
             return {
-                ...info.value,
-                title: sanitize(info.value.title),
-                uploader: sanitize(info.value.uploader),
-                thumbnail: info.value.thumbnail // URL is safe
+                title: infoTitle.value,
+                uploader: infoUploader.value,
+                thumbnail: infoThumbnail.value,
+                view_count: infoViewCount.value,
+                duration: infoDuration.value
+            }
+        })
+        
+        // Computed - downloadProgress object for template
+        const downloadProgress = computed(() => {
+            if (!progressStatus.value) return null
+            return {
+                status: progressStatus.value,
+                progress: progressValue.value,
+                message: progressMessage.value,
+                filename: progressFilename.value,
+                speed: progressSpeed.value,
+                eta: progressEta.value
             }
         })
 
-        // History management with deduplication
+        // History management with minimal updates (splice instead of reassign)
         const saveToHistory = (videoInfo) => {
             const historyItem = {
                 url: url.value,
@@ -103,9 +127,19 @@ createApp({
                 timestamp: Date.now()
             }
             
-            // Remove duplicates by URL
-            const filtered = history.value.filter(item => item.url !== url.value)
-            history.value = [historyItem, ...filtered].slice(0, 20)
+            // Remove duplicate by URL (minimal change)
+            const existingIndex = history.value.findIndex(item => item.url === url.value)
+            if (existingIndex !== -1) {
+                history.value.splice(existingIndex, 1)
+            }
+            
+            // Add to beginning
+            history.value.unshift(historyItem)
+            
+            // Trim to 20 items
+            if (history.value.length > 20) {
+                history.value.splice(20)
+            }
         }
 
         const confirmClearHistory = () => {
@@ -113,7 +147,7 @@ createApp({
         }
 
         const clearHistory = () => {
-            history.value = []
+            history.value.splice(0, history.value.length)
             showDeleteModal.value = false
         }
 
@@ -124,7 +158,7 @@ createApp({
         const loadFromHistory = (item) => {
             url.value = item.url
             currentPage.value = 'home'
-            fetchInfo()
+            fetchInfoImmediate()
         }
 
         // Format timestamp with dayjs
@@ -141,7 +175,7 @@ createApp({
             currentPage.value = page
         }
 
-        // Theme management (VueUse handles everything)
+        // Theme management
         const toggleTheme = (event) => {
             isDarkMode.value = event.target.checked
         }
@@ -150,7 +184,7 @@ createApp({
             toggleDark()
         }
 
-        // Clipboard with VueUse
+        // Clipboard
         const pasteFromClipboard = async () => {
             try {
                 const text = await navigator.clipboard.readText()
@@ -160,24 +194,57 @@ createApp({
             }
         }
 
-        // Video info with debounce
+        // Video info with AbortController for cancellable requests
         const fetchInfoImmediate = async () => {
             if (!url.value) return
+            
+            // Cancel previous request
+            if (abortController) {
+                abortController.abort()
+            }
+            abortController = new AbortController()
+            
             loading.value = true
             error.value = null
-            info.value = null
+            hasInfo.value = false
             
             try {
-                const response = await api.post('/info', { url: url.value })
-                info.value = response.data
+                const response = await api.post('/info', 
+                    { url: url.value }, 
+                    { signal: abortController.signal }
+                )
+                
+                const data = response.data
+                
+                // Update granular refs (sanitized)
+                infoTitle.value = sanitize(data.title)
+                infoUploader.value = sanitize(data.uploader)
+                infoThumbnail.value = data.thumbnail
+                infoViewCount.value = data.view_count || 0
+                infoDuration.value = data.duration || 0
+                hasInfo.value = true
+                
+                // Pre-compute available qualities (once, no re-computation)
+                const qualities = new Set()
+                data.formats?.forEach(format => {
+                    if (format.height && format.vcodec !== 'none') {
+                        qualities.add(format.height)
+                    }
+                })
+                availableQualities.value = Array.from(qualities)
+                    .filter(q => [1080, 720, 480].includes(q))
+                    .sort((a, b) => b - a)
+                
             } catch (e) {
-                error.value = e.message
+                if (e.name !== 'AbortError') {
+                    error.value = e.message
+                }
             } finally {
                 loading.value = false
             }
         }
 
-        // Debounced version for auto-fetch
+        // Debounced version for auto-fetch (300ms)
         const fetchInfo = useDebounceFn(fetchInfoImmediate, 300)
 
         const formatDuration = (seconds) => {
@@ -191,14 +258,19 @@ createApp({
                 : `${m}:${s.toString().padStart(2, '0')}`
         }
 
-        // WebSocket with auto-reconnect (VueUse)
+        // WebSocket - singleton with reconnection
         let ws = null
         
         const connectWebSocket = (taskId) => {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
             const wsUrl = `${protocol}//${window.location.host}/download/progress/ws/${taskId}`
             
-            // Use reconnecting-websocket for reliability
+            // Close existing connection if any
+            if (ws) {
+                ws.close()
+                ws = null
+            }
+            
             ws = new ReconnectingWebSocket(wsUrl, [], {
                 maxRetries: 10,
                 reconnectionDelayGrowFactor: 1.3,
@@ -216,7 +288,26 @@ createApp({
                 
                 try {
                     const data = JSON.parse(event.data)
-                    downloadProgress.value = data
+                    
+                    // Optimized: only update changed values to minimize re-renders
+                    if (data.status && data.status !== progressStatus.value) {
+                        progressStatus.value = data.status
+                    }
+                    if (data.progress !== undefined && data.progress !== progressValue.value) {
+                        progressValue.value = data.progress
+                    }
+                    if (data.message && data.message !== progressMessage.value) {
+                        progressMessage.value = data.message
+                    }
+                    if (data.filename && data.filename !== progressFilename.value) {
+                        progressFilename.value = data.filename
+                    }
+                    if (data.speed && data.speed !== progressSpeed.value) {
+                        progressSpeed.value = data.speed
+                    }
+                    if (data.eta && data.eta !== progressEta.value) {
+                        progressEta.value = data.eta
+                    }
                     
                     if (data.status === 'completed') {
                         setTimeout(() => {
@@ -224,13 +315,7 @@ createApp({
                         }, 500)
                     } else if (data.status === 'cancelled' || data.status === 'error') {
                         setTimeout(() => {
-                            downloadProgress.value = null
-                            downloading.value = false
-                            currentTaskId.value = null
-                            if (ws) {
-                                ws.close()
-                                ws = null
-                            }
+                            resetProgress()
                         }, 2000)
                     }
                 } catch (e) {
@@ -255,6 +340,23 @@ createApp({
                 }
             }, 30000)
         }
+        
+        // Reset progress state
+        const resetProgress = () => {
+            progressStatus.value = null
+            progressValue.value = 0
+            progressMessage.value = ''
+            progressFilename.value = ''
+            progressSpeed.value = ''
+            progressEta.value = ''
+            downloading.value = false
+            currentTaskId.value = null
+            
+            if (ws) {
+                ws.close()
+                ws = null
+            }
+        }
 
         // Download
         const triggerBrowserDownload = (taskId) => {
@@ -266,17 +368,14 @@ createApp({
             
             setTimeout(() => {
                 document.body.removeChild(a)
-                downloadProgress.value = null
-                downloading.value = false
-                currentTaskId.value = null
-                
-                if (ws) {
-                    ws.close()
-                    ws = null
-                }
+                resetProgress()
                 
                 if (info.value) {
-                    saveToHistory(info.value)
+                    saveToHistory({
+                        title: infoTitle.value,
+                        uploader: infoUploader.value,
+                        thumbnail: infoThumbnail.value
+                    })
                 }
             }, 1000)
         }
@@ -284,10 +383,8 @@ createApp({
         const cancelDownload = async () => {
             if (!currentTaskId.value) return
             
-            if (downloadProgress.value) {
-                downloadProgress.value.status = 'cancelling'
-                downloadProgress.value.message = 'キャンセル中...'
-            }
+            progressStatus.value = 'cancelling'
+            progressMessage.value = 'キャンセル中...'
             
             try {
                 await api.post(`/download/cancel/${currentTaskId.value}`)
@@ -295,26 +392,20 @@ createApp({
             } catch (e) {
                 console.error('Cancel error:', e)
                 setTimeout(() => {
-                    downloadProgress.value = null
-                    downloading.value = false
-                    currentTaskId.value = null
-                    if (ws) {
-                        ws.close()
-                        ws = null
-                    }
+                    resetProgress()
                 }, 2000)
             }
         }
 
         const download = async () => {
-            if (!info.value) return
+            if (!hasInfo.value) return
             downloading.value = true
             error.value = null
-            downloadProgress.value = {
-                status: 'queued',
-                progress: 0,
-                message: 'ダウンロードを開始しています...'
-            }
+            
+            // Initialize progress
+            progressStatus.value = 'queued'
+            progressValue.value = 0
+            progressMessage.value = 'ダウンロードを開始しています...'
             
             try {
                 const payload = { url: url.value }
@@ -331,11 +422,11 @@ createApp({
             } catch (e) {
                 error.value = e.message
                 downloading.value = false
-                downloadProgress.value = null
+                resetProgress()
             }
         }
 
-        // Ripple effect (keeping simple version, VueUse Motion is for complex animations)
+        // Ripple effect - CSS-based animation (no setTimeout needed)
         const addRipple = (event) => {
             const button = event.currentTarget
             const ripple = document.createElement('span')
@@ -350,22 +441,32 @@ createApp({
             ripple.classList.add('ripple')
 
             button.appendChild(ripple)
-
-            setTimeout(() => {
+            
+            // Auto-remove after CSS animation completes
+            ripple.addEventListener('animationend', () => {
                 ripple.remove()
-            }, 600)
+            })
         }
 
         // Cleanup on unmount
-        onMounted(() => {
-            // VueUse handles everything automatically
+        onUnmounted(() => {
+            // Cancel pending requests
+            if (abortController) {
+                abortController.abort()
+            }
+            
+            // Close WebSocket
+            if (ws) {
+                ws.close()
+                ws = null
+            }
         })
 
         // Return public API
         return {
-            url, info: safeInfo, loading, downloading, error, selectedQuality,
+            url, info, loading, downloading, error, selectedQuality,
             currentPage, showDeleteModal, showSettingsModal, history, isDarkMode, downloadProgress,
-            availableQualities, currentTaskId,
+            availableQualities, currentTaskId, hasInfo,
             fetchInfo: fetchInfoImmediate, formatDuration, download, cancelDownload, navigateToPage,
             pasteFromClipboard, confirmClearHistory, clearHistory, deleteHistoryItem, loadFromHistory, 
             toggleTheme, toggleThemeManual, addRipple, formatTimestamp, formatRelativeTime

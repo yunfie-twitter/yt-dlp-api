@@ -1,200 +1,502 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100..900&display=swap');
+/* ============================================
+   Base Layout
+   ============================================ */
+* {
+    box-sizing: border-box;
+}
 
-/* Base Layout */
-body {
-    display: flex;
-    flex-direction: row;
-    height: 100vh;
+html, body {
     margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
     overflow: hidden;
-    font-family: "Noto Sans JP", sans-serif;
-    font-optical-sizing: auto;
-    font-weight: 400; /* 本文標準 */
-    font-style: normal;
-    line-height: 1.5;
 }
 
-/* 見出し */
-h1,h2,h3,h4,h5,h6{font-weight:700;line-height:1.3;}
-
-/* Rail Navigation */
-.rail-nav{width:80px;background:var(--surface-container);display:flex;flex-direction:column;align-items:center;padding:1rem 0;gap:0.5rem;border-right:1px solid var(--outline-variant);}
-.rail-nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;cursor:pointer;text-decoration:none;color:var(--on-surface);transition:background 180ms cubic-bezier(0.4,0,0.2,1),box-shadow 180ms cubic-bezier(0.4,0,0.2,1),transform 180ms cubic-bezier(0.4,0,0.2,1);}
-.rail-nav a i{font-size:24px; font-weight:500;} /* アイコン中程度 */
-.rail-nav a span{font-size:12px;margin-top:4px;font-weight:500;} /* ラベル中程度 */
-.rail-nav a:hover{background:var(--surface-variant);box-shadow:0 1px 3px rgba(0,0,0,0.12);transform:translateY(-1px);}
-.rail-nav a:active{transform:scale(0.97);box-shadow:0 1px 2px rgba(0,0,0,0.08);}
-.rail-nav a.active{background:var(--secondary-container);color:var(--on-secondary-container);box-shadow:0 2px 4px rgba(0,0,0,0.15);}
-
-/* Main Container */
-.main-container{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-header{flex-shrink:0;}
-main{flex:1;overflow-y:auto;padding-bottom:0;}
-
-/* Buttons */
-button{font-weight:500;position:relative;overflow:hidden;transition:background 150ms cubic-bezier(0.4,0,0.2,1),transform 150ms cubic-bezier(0.4,0,0.2,1),box-shadow 150ms cubic-bezier(0.4,0,0.2,1),opacity 150ms cubic-bezier(0.4,0,0.2,1);}
-button:hover:not(:disabled){box-shadow:0 2px 4px rgba(0,0,0,0.12);transform:translateY(-1px);}
-button:active:not(:disabled){transform:scale(0.98) translateY(0);box-shadow:0 1px 2px rgba(0,0,0,0.1);}
-button:disabled{opacity:0.6;}
-
-/* Ripple */
-@keyframes ripple{from{transform:scale(0);opacity:0.5;}to{transform:scale(4);opacity:0;}}
-.ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,0.4);width:20px;height:20px;animation:ripple 600ms cubic-bezier(0.4,0,0.2,1);pointer-events:none;}
-
-/* Form Elements */
-input,select{font-weight:400;transition:border-color 200ms cubic-bezier(0.4,0,0.2,1),box-shadow 200ms cubic-bezier(0.4,0,0.2,1);}
-input:focus,select:focus{box-shadow:0 0 0 2px rgba(var(--primary-rgb),0.2);}
-.field{transition:border-color 200ms cubic-bezier(0.4,0,0.2,1);}
-.switch{transition:opacity 150ms cubic-bezier(0.4,0,0.2,1);}
-.switch:hover{opacity:0.9;}
-
-/* Footer Progress */
-footer{flex-shrink:0;border-top:1px solid var(--outline-variant);background:var(--surface-container);animation:slideUp 300ms cubic-bezier(0.4,0,0.2,1);}
-footer .progress-info{display:flex;flex-direction:column;gap:0.25rem;flex:1;}
-footer .progress-bar{width:200%;height:4px;background:var(--surface-variant);border-radius:2px;overflow:hidden;}
-footer .progress-bar-fill{height:100%;background:var(--primary);transition:width 300ms cubic-bezier(0.4,0,0.2,1);}
-footer .progress-text{font-size:12px;color:var(--on-surface-variant); font-weight:500;} /* 進捗ラベル中程度 */
-footer .progress-stats{font-size:11px;color:var(--on-surface-variant);display:flex;gap:0.5rem;font-weight:500;}
-
-/* Bottom Navigation */
-.bottom-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface-container);border-top:1px solid var(--outline-variant);z-index:100;}
-.bottom-nav nav{display:flex;justify-content:space-around;padding:0.5rem 0;}
-.bottom-nav a{display:flex;flex-direction:column;align-items:center;padding:0.5rem 1rem;border-radius:16px;cursor:pointer;text-decoration:none;color:var(--on-surface);transition:background 180ms cubic-bezier(0.4,0,0.2,1),transform 180ms cubic-bezier(0.4,0,0.2,1);}
-.bottom-nav a:active{transform:scale(0.97);}
-.bottom-nav a.active{background:var(--secondary-container);color:var(--on-secondary-container);}
-.bottom-nav a i{font-size:24px;font-weight:500;}
-.bottom-nav a span{font-size:12px;margin-top:4px;font-weight:500;}
-
-/* Thumbnail */
-.thumbnail-container{position:relative;overflow:hidden;border-radius:12px;transition:transform 200ms cubic-bezier(0.4,0,0.2,1),box-shadow 200ms cubic-bezier(0.4,0,0.2,1);}
-.thumbnail-container img{width:100%;height:100%;object-fit:cover;transition:transform 300ms cubic-bezier(0.4,0,0.2,1);}
-.thumbnail-container:hover img{transform:scale(1.02);}
-.thumbnail-overlay{position:absolute;bottom:0;right:0;padding:0.25rem 0.5rem;margin:0.5rem;background:rgba(0,0,0,0.75);color:white;border-radius:4px;font-size:12px;font-weight:500;backdrop-filter:blur(4px);}
-
-/* Video Info */
-.video-info-card{margin-top:1rem;animation:fadeIn 350ms cubic-bezier(0.4,0,0.2,1);}
-.video-info-card h6{font-weight:600;}
-.video-meta i{font-weight:500;}
-
-/* History */
-.history-item{position:relative;cursor:pointer;margin-bottom:0.5rem;transition:background 180ms cubic-bezier(0.4,0,0.2,1),box-shadow 180ms cubic-bezier(0.4,0,0.2,1),transform 180ms cubic-bezier(0.4,0,0.2,1);}
-.history-item:hover{background:var(--surface-variant);box-shadow:0 2px 4px rgba(0,0,0,0.08);transform:translateY(-1px);}
-.history-item:active{transform:scale(0.99) translateY(0);}
-.history-item .history-title{font-weight:600;}
-.history-delete{opacity:0;transition:opacity 150ms cubic-bezier(0.4,0,0.2,1),transform 150ms cubic-bezier(0.4,0,0.2,1);}
-.history-item:hover .history-delete{opacity:1;}
-.history-delete:hover{transform:scale(1.1);}
-
-/* Modal */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;display:none;align-items:center;justify-content:center;animation:fadeInOverlay 250ms cubic-bezier(0.4,0,0.2,1);backdrop-filter:blur(2px);}
-.modal-overlay.active{display:flex;}
-@keyframes fadeInOverlay{from{opacity:0;}to{opacity:1;}}
-dialog{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;max-height:90vh;overflow-y:auto;display:none;box-shadow:0 12px 48px rgba(0,0,0,0.12),0 0 2px rgba(0,0,0,0.08);}
-dialog.active{display:block;z-index:1000;animation:modalSlideIn 280ms cubic-bezier(0.4,0,0.2,1) forwards;}
-@keyframes modalSlideIn{0%{opacity:0;transform:translate(-50%,calc(-50% - 8px));}100%{opacity:1;transform:translate(-50%,-50%);}}
-.modal-close{position:absolute;top:1rem;right:1rem;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 150ms cubic-bezier(0.4,0,0.2,1),transform 150ms cubic-bezier(0.4,0,0.2,1);}
-.modal-close:hover{background:var(--surface-variant);transform:scale(1.05);}
-.modal-close:active{transform:scale(0.95);}
-dialog h6{font-weight:600;} /* モーダルタイトル */
-dialog p{font-weight:400;} /* モーダル本文 */
-dialog button{font-weight:500;} /* モーダル内ボタン */
-
-/* Settings */
-.settings-item{padding:1.5rem;border-bottom:1px solid var(--outline-variant);transition:background 150ms cubic-bezier(0.4,0,0.2,1);}
-.settings-item:hover{background:rgba(var(--primary-rgb),0.04);}
-.settings-item:last-child{border-bottom:none;}
-.settings-item h6{font-weight:600;}
-.settings-item .small{margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;font-weight:400;}
-
-/* Links */
-a{font-weight:400;transition:color 150ms cubic-bezier(0.4,0,0.2,1),opacity 150ms cubic-bezier(0.4,0,0.2,1);}
-a:hover{opacity:0.85;}
-
-/* Responsive */
-@media (max-width:768px){
-    .rail-nav{display:none;}
-    .bottom-nav{display:block;}
-    main{padding-bottom:80px;}
-    footer{margin-bottom:64px;}
-    body{flex-direction:column;height:auto;}
-    header{padding:0.5rem 1rem;}
-    main{padding:0.5rem 1rem 80px;}
-    .history-thumbnail{width:80px;height:60px;}
-    .thumbnail-container{border-radius:8px;}
-    .rail-nav a span, .bottom-nav a span, footer .progress-text, footer .progress-stats{font-size:10px;font-weight:500;}
-    dialog{width:90%;max-width:320px;}
-    .video-info-card,.settings-item{padding:1rem;}
-}
-@media (min-width:769px) and (max-width:1024px){
-    .rail-nav{width:60px;padding:0.5rem 0;}
-    .rail-nav a{width:48px;height:48px;border-radius:12px;}
-    .rail-nav a i{font-size:20px;}
-    .rail-nav a span{font-size:10px;font-weight:500;}
-    .bottom-nav{display:none;}
-    main{padding:0.5rem 1rem;}
-    .history-thumbnail{width:100px;height:75px;}
-    .thumbnail-container{border-radius:10px;}
-    .video-info-card,.settings-item{padding:1rem;}
-    .video-meta i{font-size:16px;}
-    footer .progress-text, footer .progress-stats{font-size:11px;}
-    dialog{width:80%;max-width:480px;}
-}
-@media (max-width:360px){
-    .rail-nav a span, .bottom-nav a span{font-size:9px;font-weight:500;}
-    .history-item,.video-info-card,.settings-item{font-size:12px;}
-    .history-thumbnail{width:70px;height:55px;}
-    .thumbnail-container{border-radius:6px;}
-    main{padding:0.5rem;}
-    dialog{width:95%;max-width:280px;}
+body {
+    font-family: 'Roboto', sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* ラベル・カード内テキスト1行固定 */
-.rail-nav a span,
-.bottom-nav a span,
-.history-item .history-title,
-.video-info-card h6,
-.settings-item h6,
-dialog h6 {
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+#app {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
 }
-/* History Thumbnails 修正版 */
+
+/* ============================================
+   Rail Navigation (Desktop Sidebar)
+   ============================================ */
+.rail-nav {
+    width: 80px;
+    background: var(--surface-container);
+    border-right: 1px solid var(--outline-variant);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem 0;
+    overflow-y: auto;
+}
+
+.rail-nav a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 0.5rem;
+    width: 100%;
+    text-decoration: none;
+    color: var(--on-surface-variant);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border-radius: 12px;
+    margin: 0.25rem 0.5rem;
+}
+
+.rail-nav a:hover {
+    background: var(--surface-container-highest);
+    color: var(--on-surface);
+}
+
+.rail-nav a.active {
+    background: var(--secondary-container);
+    color: var(--on-secondary-container);
+}
+
+.rail-nav a i {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.rail-nav a span {
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+/* ============================================
+   Main Container
+   ============================================ */
+.main-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--surface);
+}
+
+header {
+    background: var(--surface-container);
+    border-bottom: 1px solid var(--outline-variant);
+    padding: 0 1rem;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+header nav {
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 1rem 5rem 1rem;
+}
+
+main.responsive {
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* ============================================
+   Components
+   ============================================ */
+article.border {
+    margin: 1rem 0;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.padding {
+    padding: 1.5rem;
+}
+
+.small-padding {
+    padding: 1rem;
+}
+
+/* ============================================
+   Ripple Effect (CSS Animation)
+   ============================================ */
+button {
+    position: relative;
+    overflow: hidden;
+}
+
+.ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+    transform: scale(0);
+    pointer-events: none;
+    animation: rippleEffect 0.6s ease-out;
+}
+
+@keyframes rippleEffect {
+    to {
+        transform: scale(4);
+        opacity: 0;
+    }
+}
+
+/* Dark mode ripple adjustment */
+body.dark .ripple {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ============================================
+   Form Elements
+   ============================================ */
+.field.label.border {
+    margin: 1rem 0;
+}
+
+.field input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ============================================
+   Footer Progress Bar
+   ============================================ */
+footer {
+    position: fixed;
+    bottom: 0;
+    left: 80px;
+    right: 0;
+    background: var(--surface-container-high);
+    border-top: 1px solid var(--outline-variant);
+    padding: 1rem;
+    z-index: 100;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+footer nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.progress-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.progress-text {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--surface-container-highest);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.3s ease;
+    border-radius: 3px;
+}
+
+.progress-stats {
+    font-size: 0.875rem;
+    color: var(--on-surface-variant);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.download-progress {
+    margin-left: 0.5rem;
+}
+
+/* ============================================
+   Bottom Navigation (Mobile)
+   ============================================ */
+.bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface-container);
+    border-top: 1px solid var(--outline-variant);
+    z-index: 1000;
+}
+
+.bottom-nav nav {
+    display: flex;
+    justify-content: space-around;
+    padding: 0.5rem 0;
+}
+
+.bottom-nav a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    color: var(--on-surface-variant);
+    transition: color 0.2s ease;
+    cursor: pointer;
+}
+
+.bottom-nav a.active {
+    color: var(--primary);
+}
+
+.bottom-nav a i {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.bottom-nav a span {
+    font-size: 0.75rem;
+}
+
+/* ============================================
+   Thumbnail
+   ============================================ */
+.thumbnail-container {
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--surface-container-highest);
+}
+
+.thumbnail-container img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.thumbnail-overlay {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* ============================================
+   Video Info Card
+   ============================================ */
+.video-info-card {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.video-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+    color: var(--on-surface-variant);
+    font-size: 0.875rem;
+}
+
+.quality-selector {
+    margin: 1rem 0;
+}
+
+/* ============================================
+   History
+   ============================================ */
+.history-item {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.history-item:hover {
+    background: var(--surface-container-high);
+}
+
 .history-thumbnail {
-    width: 150px;       /* PC標準サイズ */
-    max-width: 180px;   /* これ以上大きくならない */
-    height: auto;       /* アスペクト比維持 */
-    max-height: 100px;  /* 高さ上限 */
+    width: 120px;
+    height: 68px;
     object-fit: cover;
     border-radius: 8px;
-    margin-right: 1rem;
-    transition: transform 200ms cubic-bezier(0.4,0,0.2,1);
+    flex-shrink: 0;
 }
 
-.history-item:hover .history-thumbnail {
-    transform: scale(1.02);
+.history-delete {
+    flex-shrink: 0;
 }
 
-/* タブレット用サイズ調整 */
-@media (min-width:769px) and (max-width:1024px){
-    .history-thumbnail {
-        width: 130px;
-        max-height: 85px;
+/* ============================================
+   Modal
+   ============================================ */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    backdrop-filter: blur(4px);
+}
+
+.modal-overlay.active {
+    display: block;
+}
+
+dialog {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: auto;
+}
+
+dialog.active {
+    display: block;
+}
+
+.modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+}
+
+/* ============================================
+   Settings
+   ============================================ */
+.settings-item {
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--outline-variant);
+}
+
+.settings-item:last-child {
+    border-bottom: none;
+}
+
+/* ============================================
+   Links
+   ============================================ */
+a[target="_blank"] {
+    color: var(--primary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+a[target="_blank"]:hover {
+    text-decoration: underline;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+.page-enter-active {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
 
-/* モバイル用サイズ調整 */
-@media (max-width:768px){
-    .history-thumbnail {
-        width: 100px;
-        max-height: 65px;
+.error-enter-active {
+    animation: shakeIn 0.5s ease-out;
+}
+
+@keyframes shakeIn {
+    0%, 100% {
+        transform: translateX(0);
+    }
+    25% {
+        transform: translateX(-10px);
+    }
+    75% {
+        transform: translateX(10px);
     }
 }
 
-@media (max-width:360px){
+/* ============================================
+   Responsive (Mobile)
+   ============================================ */
+@media (max-width: 768px) {
+    .rail-nav {
+        display: none;
+    }
+
+    .bottom-nav {
+        display: block;
+    }
+
+    footer {
+        left: 0;
+        bottom: 56px;
+    }
+
+    main {
+        padding-bottom: 8rem;
+    }
+
     .history-thumbnail {
         width: 80px;
-        max-height: 55px;
+        height: 45px;
+    }
+
+    dialog {
+        max-width: 95vw;
     }
 }
-ｖ
