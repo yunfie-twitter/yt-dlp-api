@@ -44,7 +44,24 @@
     background: #b71c1c; /* Error red for high visibility */
 }
 
-/* 3. Settings Modal Full Screen on Mobile */
+/* 3. Dialog motion (subtle) */
+dialog {
+    z-index: 100;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    pointer-events: none;
+}
+
+dialog.active {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+/* 4. Settings Modal Full Screen on Mobile */
 @media (max-width: 480px) and (pointer: coarse) {
     dialog.active {
         /* Override default dialog styles for mobile fullscreen */
@@ -217,7 +234,7 @@ footer {
     right: 0;
     background: var(--surface-container-highest);
     border-top: 1px solid var(--outline-variant);
-    z-index: 25; /* Higher than bottom-nav (30) to stay visible */
+    z-index: 25;
     padding: 0;
 }
 
@@ -326,11 +343,41 @@ footer nav {
     .history-thumbnail {
         width: 80px;
     }
-    
-    /* Fix page header text wrapping */
-    .padding .row h5 {
+
+    /* Prevent header/button overflow (history clear button, etc.) */
+    .padding .row {
+        min-width: 0;
+        gap: 8px;
+        flex-wrap: nowrap;
+    }
+
+    .padding .row .max {
+        min-width: 0;
+    }
+
+    .padding .row h5.max {
         white-space: nowrap;
-        overflow: visible;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .padding .row button {
+        flex-shrink: 0;
+        max-width: 100%;
+    }
+
+    /* Avoid right overflow inside dialogs on mobile */
+    dialog {
+        max-width: 100vw;
+    }
+
+    dialog nav {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    dialog .field {
+        max-width: 100%;
     }
 }
 
@@ -368,10 +415,6 @@ footer nav {
 .modal-overlay.active {
     opacity: 1;
     pointer-events: auto;
-}
-
-dialog {
-    z-index: 100;
 }
 
 .modal-close {
