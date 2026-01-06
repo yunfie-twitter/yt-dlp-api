@@ -128,7 +128,9 @@
 main.responsive {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden; /* Prevent horizontal scroll */
     padding-bottom: 80px; /* Space for footer */
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
 }
 
 .thumbnail-container {
@@ -215,7 +217,7 @@ footer {
     right: 0;
     background: var(--surface-container-highest);
     border-top: 1px solid var(--outline-variant);
-    z-index: 20;
+    z-index: 25; /* Higher than bottom-nav (30) to stay visible */
     padding: 0;
 }
 
@@ -310,11 +312,11 @@ footer nav {
     }
 
     .main-container {
-        padding-bottom: 80px; /* Space for bottom nav */
+        padding-bottom: 0; /* Remove default padding */
     }
     
     main.responsive {
-        padding-bottom: 80px;
+        padding-bottom: 140px; /* Space for bottom nav (80px) + footer (60px) */
     }
 
     footer {
@@ -323,6 +325,12 @@ footer nav {
 
     .history-thumbnail {
         width: 80px;
+    }
+    
+    /* Fix page header text wrapping */
+    .padding .row h5 {
+        white-space: nowrap;
+        overflow: visible;
     }
 }
 
@@ -370,6 +378,7 @@ dialog {
     position: absolute;
     top: 8px;
     right: 8px;
+    z-index: 101; /* Ensure button is above dialog content */
 }
 
 /* Transitions */
