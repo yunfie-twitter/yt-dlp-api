@@ -139,6 +139,37 @@ createApp({
             }
         )
 
+        // API Health Check - Periodic polling
+        let healthCheckInterval = null
+        
+        const checkApiHealth = async () => {
+            try {
+                // Try simple GET request to root or a lightweight health endpoint
+                await axios.get(`${getApiBase()}/`, { timeout: 5000 })
+                hideDisconnectNotification()
+            } catch (e) {
+                console.warn('API health check failed:', e)
+                showDisconnectNotification()
+            }
+        }
+        
+        const startHealthCheck = () => {
+            // Initial check
+            checkApiHealth()
+            
+            // Check every 30 seconds
+            healthCheckInterval = setInterval(() => {
+                checkApiHealth()
+            }, 30000)
+        }
+        
+        const stopHealthCheck = () => {
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval)
+                healthCheckInterval = null
+            }
+        }
+
         // AbortController for cancellable requests
         let abortController = null
 
@@ -629,8 +660,16 @@ createApp({
             })
         }
 
+        // Lifecycle: Start health check on mount
+        onMounted(() => {
+            startHealthCheck()
+        })
+
         // Cleanup on unmount
         onUnmounted(() => {
+            // Stop health check
+            stopHealthCheck()
+            
             // Cancel pending requests
             if (abortController) {
                 abortController.abort()
