@@ -283,6 +283,27 @@ footer.download-footer .stats-row {
         gap: 1rem; /* Smaller gap on mobile */
     }
 
+    /* Mobile Setup Wizard: Full Screen */
+    .setup-wizard {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        padding: 2rem 1.5rem !important; /* Slightly adjusted padding */
+        display: flex;
+        flex-direction: column;
+        justify-content: center; /* Center content vertically */
+    }
+    
+    .setup-wizard .wizard-step {
+        /* Ensure step content takes available space but doesn't overflow badly */
+        width: 100%;
+        max-width: 400px; /* Keep content readable */
+        margin: 0 auto;
+    }
+
     .history-thumbnail { width: 80px; }
     .padding .row h5 { font-size: 1.2rem; }
     .history-item p.bold { font-size: 0.85rem; }
