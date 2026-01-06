@@ -347,6 +347,9 @@ createApp({
         // Navigation
         const navigateToPage = (page) => {
             currentPage.value = page
+            
+            // Handle browser back button support if needed later
+            // For now, history view has 'Back' button handled in template
         }
 
         // Theme management
@@ -673,9 +676,38 @@ createApp({
             })
         }
 
+        // Handle URL parameters for automation
+        const handleUrlParameters = () => {
+            const params = new URLSearchParams(window.location.search)
+            const urlParam = params.get('url')
+            const qualityParam = params.get('quality')
+
+            if (urlParam) {
+                url.value = urlParam
+                // Auto fetch info
+                setTimeout(() => {
+                    fetchInfoImmediate()
+                }, 500) // Small delay to ensure everything is mounted
+            }
+            
+            if (qualityParam) {
+                selectedQuality.value = qualityParam
+            }
+        }
+
         // Lifecycle: Start health check on mount
         onMounted(() => {
             startHealthCheck()
+            handleUrlParameters() // Check URL parameters on load
+            
+            // Handle browser history back navigation
+            window.addEventListener('popstate', () => {
+                // If we want to support back button to close modals or go back to home
+                if (showSettingsModal.value) showSettingsModal.value = false
+                else if (showDeleteModal.value) showDeleteModal.value = false
+                else if (showCancelModal.value) showCancelModal.value = false
+                else if (currentPage.value !== 'home') currentPage.value = 'home'
+            })
         })
 
         // Cleanup on unmount
