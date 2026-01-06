@@ -2,7 +2,7 @@
 
 :root {
     --bottom-nav-height: 80px;
-    --download-footer-height: 64px; /* Slightly more compact based on image */
+    --download-footer-height: 100px; /* Increased for 3 rows: Title, Bar, Message */
 }
 
 /* 1. Remove shadows from settings items */
@@ -212,7 +212,7 @@ main.responsive {
     opacity: 1;
 }
 
-/* Download Progress Footer - Exact Match to Screenshot */
+/* Download Progress Footer - 3 Row Layout */
 footer.download-footer {
     position: fixed;
     left: 0;
@@ -221,20 +221,56 @@ footer.download-footer {
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--surface-container-highest);
     border-top: 1px solid var(--outline-variant);
-    z-index: 50; /* Higher than rail-nav (10) and bottom-nav (30) */
+    z-index: 50;
     height: var(--download-footer-height);
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+    padding-top: 8px;
 }
 
-/* Main row container */
+/* Row 1: Title (Centered) */
+footer.download-footer .title-row {
+    display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+    width: 100%;
+    margin-bottom: 4px;
+}
+
+footer.download-footer .title-spacer {
+    flex: 1; /* Pushes title to center if we want center alignment, or adjust as needed */
+    /* Since user requested: [Blank] [Title]
+       We can just make it left-aligned but offset? 
+       Actually user mockup showed: [Space] [Title] 
+       And below: [Icon] [Bar] [Close]
+       
+       Let's center the title or align it with the bar start.
+       Let's align it with the bar start (left of bar).
+    */
+    width: 48px; /* Approximate width of icon + gap to align with bar */
+    flex-shrink: 0;
+}
+
+footer.download-footer .download-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--on-surface);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* User asked for [Space] [Title], implying alignment with bar start. */
+    padding-left: 0.5rem; 
+}
+
+/* Row 2: Icon | Bar | Close */
 footer.download-footer .progress-row {
     display: flex;
     align-items: center;
     gap: 1rem;
     padding: 0 1.5rem;
     width: 100%;
-    height: 100%;
+    height: 32px; /* Icon height */
 }
 
 /* Icon (Spinner) */
@@ -244,20 +280,18 @@ footer.download-footer .progress-row > button:first-child {
     height: 32px;
 }
 
-/* Middle Container: Bar + Stats */
-footer.download-footer .progress-container {
+/* Bar Container */
+footer.download-footer .progress-bar-container {
     flex: 1;
     min-width: 0;
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 6px; /* Space between bar and text */
+    align-items: center;
 }
 
-/* Progress Bar - Thicker and Purple */
+/* Progress Bar */
 footer.download-footer .progress-bar {
     height: 6px;
-    background: rgba(255, 255, 255, 0.1); /* Darker track */
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 3px;
     overflow: hidden;
     width: 100%;
@@ -265,13 +299,25 @@ footer.download-footer .progress-bar {
 
 footer.download-footer .progress-bar-fill {
     height: 100%;
-    background: #d0bcff; /* Light purple (Material 3 Primary Container or similar) */
+    background: #d0bcff;
     transition: width 0.3s ease;
 }
 
-/* Stats Text - Small, Left Aligned */
-footer.download-footer .progress-stats {
+/* Close Button */
+footer.download-footer .progress-row > button:last-child {
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+    color: var(--on-surface-variant);
+}
+
+/* Row 3: Stats (Left aligned under bar) */
+footer.download-footer .stats-row {
     display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+    padding-left: calc(1.5rem + 32px + 1rem); /* Left padding + Icon Width + Gap = Align with Bar start */
+    width: 100%;
+    margin-top: 4px;
     gap: 8px;
     font-size: 0.75rem;
     color: var(--on-surface-variant);
@@ -280,21 +326,14 @@ footer.download-footer .progress-stats {
     line-height: 1;
 }
 
-footer.download-footer .progress-stats > span {
+footer.download-footer .stats-row > span {
     overflow: hidden;
     text-overflow: ellipsis;
     flex-shrink: 1;
 }
 
-footer.download-footer .progress-stats > span:first-child {
+footer.download-footer .stats-row > span:first-child {
     flex-shrink: 0; /* Keep percentage visible */
-}
-
-/* Close Button - Right Aligned */
-footer.download-footer .progress-row > button:last-child {
-    flex-shrink: 0;
-    margin-left: 0.5rem;
-    color: var(--on-surface-variant);
 }
 
 /* Mobile Styles */
