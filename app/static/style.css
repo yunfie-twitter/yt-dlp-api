@@ -2,8 +2,10 @@
 
 :root {
     --bottom-nav-height: 80px;
-    --download-footer-height: 100px; /* Increased for 3 rows: Title, Bar, Message */
+    --download-footer-height: 88px; /* Taller for better vertical rhythm */
 }
+
+/* Existing styles ... (abbreviated for brevity, focusing on footer) */
 
 /* 1. Remove shadows from settings items */
 .settings-item {
@@ -11,7 +13,6 @@
     padding: 1rem;
     background: var(--surface-container);
     border-radius: 8px;
-    /* Removed box-shadow */
 }
 
 /* 2. Disconnected Toast Styles */
@@ -29,27 +30,10 @@
     transition: opacity 0.3s ease, transform 0.3s ease;
     pointer-events: none;
 }
+.conn-toast.desktop { bottom: 16px; right: 16px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+.conn-toast.mobile { top: 0; left: 0; right: 0; border-radius: 0; border-left: none; border-right: none; border-top: none; justify-content: center; background: #b71c1c; }
 
-.conn-toast.desktop {
-    bottom: 16px;
-    right: 16px;
-    border-radius: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-}
-
-.conn-toast.mobile {
-    top: 0;
-    left: 0;
-    right: 0;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-    justify-content: center;
-    background: #b71c1c; /* Error red for high visibility */
-}
-
-/* 3. Dialog motion (subtle) + center alignment - Unified for all devices */
+/* 3. Dialog motion */
 dialog {
     z-index: 100;
     box-sizing: border-box;
@@ -63,14 +47,13 @@ dialog {
     transform: translate(-50%, -50%) translateY(6px);
     margin: 0;
 }
-
 dialog.active {
     opacity: 1;
     transform: translate(-50%, -50%) translateY(0);
     pointer-events: auto;
 }
 
-/* Existing styles (preserved) */
+/* Rail Nav & Main Container (Existing) */
 .rail-nav {
     display: flex;
     flex-direction: column;
@@ -79,140 +62,35 @@ dialog.active {
     background: var(--surface);
     z-index: 10;
 }
+.rail-nav a { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 72px; width: 100%; color: var(--on-surface-variant); text-decoration: none; cursor: pointer; transition: background-color 0.2s; }
+.rail-nav a:hover { background-color: var(--surface-container-high); }
+.rail-nav a.active { color: var(--primary); }
+.rail-nav a.active i { background-color: var(--secondary-container); color: var(--on-secondary-container); border-radius: 16px; padding: 4px 20px; }
+.rail-nav a i { font-size: 24px; margin-bottom: 4px; transition: all 0.2s; }
+.rail-nav a span { font-size: 12px; font-weight: 500; }
 
-.rail-nav a {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 72px;
-    width: 100%;
-    color: var(--on-surface-variant);
-    text-decoration: none;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
+.main-container { flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; position: relative; }
+main.responsive { flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: calc(var(--download-footer-height) + 16px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+.thumbnail-container { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000; }
+.thumbnail-container img { width: 100%; height: 100%; object-fit: cover; }
+.thumbnail-overlay { position: absolute; bottom: 8px; right: 8px; background: rgba(0, 0, 0, 0.8); color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+.video-info-card { margin-top: 1rem; overflow: hidden; }
+.video-meta { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: 0.9rem; margin-bottom: 0.5rem; }
+.video-meta i { font-size: 18px; }
+.quality-selector { margin: 1rem 0; }
+.history-item { margin-bottom: 0.5rem; cursor: pointer; transition: background-color 0.2s; }
+.history-item:hover { background-color: var(--surface-container-high); }
+.history-thumbnail { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; margin-right: 1rem; }
+.history-delete { opacity: 0; transition: opacity 0.2s; }
+.history-item:hover .history-delete { opacity: 1; }
 
-.rail-nav a:hover {
-    background-color: var(--surface-container-high);
-}
-
-.rail-nav a.active {
-    color: var(--primary);
-}
-
-.rail-nav a.active i {
-    background-color: var(--secondary-container);
-    color: var(--on-secondary-container);
-    border-radius: 16px;
-    padding: 4px 20px;
-}
-
-.rail-nav a i {
-    font-size: 24px;
-    margin-bottom: 4px;
-    transition: all 0.2s;
-}
-
-.rail-nav a span {
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.main-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-    position: relative;
-}
-
-main.responsive {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden; /* Prevent horizontal scroll */
-    padding-bottom: calc(var(--download-footer-height) + 16px + env(safe-area-inset-bottom));
-    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
-}
-
-.thumbnail-container {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    border-radius: 8px;
-    overflow: hidden;
-    background: #000;
-}
-
-.thumbnail-container img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.thumbnail-overlay {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.video-info-card {
-    margin-top: 1rem;
-    overflow: hidden;
-}
-
-.video-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--on-surface-variant);
-    font-size: 0.9rem;
-    margin-bottom: 0.5rem;
-}
-
-.video-meta i {
-    font-size: 18px;
-}
-
-.quality-selector {
-    margin: 1rem 0;
-}
-
-.history-item {
-    margin-bottom: 0.5rem;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.history-item:hover {
-    background-color: var(--surface-container-high);
-}
-
-.history-thumbnail {
-    width: 120px;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    border-radius: 4px;
-    margin-right: 1rem;
-}
-
-.history-delete {
-    opacity: 0;
-    transition: opacity 0.2s;
-}
-
-.history-item:hover .history-delete {
-    opacity: 1;
-}
-
-/* Download Progress Footer - 3 Row Layout */
+/* 
+   Download Progress Footer - Rebalanced Layout
+   Goal: 
+   - Left: Icon (Visual Anchor)
+   - Center: Info Block (Title, Bar, Stats) -> Takes up most space, aligned left
+   - Right: Actions (Close) -> Visual balance
+*/
 footer.download-footer {
     position: fixed;
     left: 0;
@@ -224,74 +102,72 @@ footer.download-footer {
     z-index: 50;
     height: var(--download-footer-height);
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding-top: 8px;
+    align-items: center; /* Vertically center the main row */
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
 }
 
-/* Row 1: Title (Centered) */
-footer.download-footer .title-row {
+/* 3-Column Grid for perfect balance: [Icon 48px] [Content Auto] [Close 48px] */
+footer.download-footer .footer-grid {
     display: flex;
     align-items: center;
-    padding: 0 1.5rem;
     width: 100%;
-    margin-bottom: 4px;
+    height: 100%;
+    gap: 1.5rem;
 }
 
-footer.download-footer .title-spacer {
-    flex: 1; /* Pushes title to center if we want center alignment, or adjust as needed */
-    /* Since user requested: [Blank] [Title]
-       We can just make it left-aligned but offset? 
-       Actually user mockup showed: [Space] [Title] 
-       And below: [Icon] [Bar] [Close]
-       
-       Let's center the title or align it with the bar start.
-       Let's align it with the bar start (left of bar).
-    */
-    width: 48px; /* Approximate width of icon + gap to align with bar */
+/* Left Column: Icon */
+footer.download-footer .icon-col {
     flex-shrink: 0;
+    width: 40px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
+/* Center Column: Content Stack (Title, Bar, Stats) */
+footer.download-footer .content-col {
+    flex: 1; /* Takes all available space */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px; /* Vertical rhythm */
+    min-width: 0; /* Prevents overflow */
+}
+
+/* Right Column: Close Button */
+footer.download-footer .action-col {
+    flex-shrink: 0;
+    width: 40px;
+    display: flex;
+    justify-content: flex-end; /* Align right */
+    align-items: center;
+}
+
+/* Elements Styling */
+
+/* Title */
 footer.download-footer .download-title {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 500;
     color: var(--on-surface);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* User asked for [Space] [Title], implying alignment with bar start. */
-    padding-left: 0.5rem; 
+    line-height: 1.2;
 }
 
-/* Row 2: Icon | Bar | Close */
-footer.download-footer .progress-row {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0 1.5rem;
-    width: 100%;
-    height: 32px; /* Icon height */
-}
-
-/* Icon (Spinner) */
-footer.download-footer .progress-row > button:first-child {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-}
-
-/* Bar Container */
+/* Progress Bar Container */
 footer.download-footer .progress-bar-container {
-    flex: 1;
-    min-width: 0;
+    width: 100%;
     display: flex;
     align-items: center;
 }
 
 /* Progress Bar */
 footer.download-footer .progress-bar {
-    height: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    height: 6px; /* Slightly thicker for visibility */
+    background: rgba(var(--on-surface-rgb, 255, 255, 255), 0.12); /* Subtle track */
     border-radius: 3px;
     overflow: hidden;
     width: 100%;
@@ -299,218 +175,68 @@ footer.download-footer .progress-bar {
 
 footer.download-footer .progress-bar-fill {
     height: 100%;
-    background: #d0bcff;
+    background: #d0bcff; /* Brand color / Primary */
     transition: width 0.3s ease;
+    border-radius: 3px;
 }
 
-/* Close Button */
-footer.download-footer .progress-row > button:last-child {
-    flex-shrink: 0;
-    margin-left: 0.5rem;
-    color: var(--on-surface-variant);
-}
-
-/* Row 3: Stats (Left aligned under bar) */
+/* Stats */
 footer.download-footer .stats-row {
-    display: flex;
-    align-items: center;
-    padding: 0 1.5rem;
-    padding-left: calc(1.5rem + 32px + 1rem); /* Left padding + Icon Width + Gap = Align with Bar start */
-    width: 100%;
-    margin-top: 4px;
-    gap: 8px;
     font-size: 0.75rem;
     color: var(--on-surface-variant);
-    overflow: hidden;
     white-space: nowrap;
-    line-height: 1;
-}
-
-footer.download-footer .stats-row > span {
     overflow: hidden;
     text-overflow: ellipsis;
-    flex-shrink: 1;
-}
-
-footer.download-footer .stats-row > span:first-child {
-    flex-shrink: 0; /* Keep percentage visible */
+    line-height: 1;
+    display: flex;
+    gap: 8px;
 }
 
 /* Mobile Styles */
-.bottom-nav {
-    display: none;
-    background: var(--surface);
-    border-top: 1px solid var(--outline-variant);
-}
+.bottom-nav { display: none; background: var(--surface); border-top: 1px solid var(--outline-variant); }
 
 @media (max-width: 600px) {
-    .rail-nav {
-        display: none;
-    }
+    .rail-nav { display: none; }
+    .bottom-nav { display: block; position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; padding-bottom: env(safe-area-inset-bottom); }
+    .bottom-nav nav { display: flex; justify-content: space-around; padding: 0; }
+    .bottom-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 0; color: var(--on-surface-variant); text-decoration: none; }
+    .bottom-nav a.active { color: var(--primary); }
+    .bottom-nav a.active i { background-color: var(--secondary-container); color: var(--on-secondary-container); border-radius: 16px; padding: 4px 20px; }
 
-    .bottom-nav {
-        display: block;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        z-index: 30;
-        padding-bottom: env(safe-area-inset-bottom);
-    }
+    main.responsive { padding-bottom: calc(var(--bottom-nav-height) + var(--download-footer-height) + 16px + env(safe-area-inset-bottom)); }
 
-    .bottom-nav nav {
-        display: flex;
-        justify-content: space-around;
-        padding: 0;
-    }
-
-    .bottom-nav a {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 8px 0;
-        color: var(--on-surface-variant);
-        text-decoration: none;
-    }
-
-    .bottom-nav a.active {
-        color: var(--primary);
-    }
-
-    .bottom-nav a.active i {
-        background-color: var(--secondary-container);
-        color: var(--on-secondary-container);
-        border-radius: 16px;
-        padding: 4px 20px;
-    }
-
-    main.responsive {
-        padding-bottom: calc(var(--bottom-nav-height) + var(--download-footer-height) + 16px + env(safe-area-inset-bottom));
-    }
-
-    /* On mobile, footer sits ABOVE bottom nav */
     footer.download-footer {
         bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
-        padding-bottom: 0; /* Already handled by bottom offset */
-        z-index: 40; /* Above bottom nav */
+        padding-bottom: 0;
+        z-index: 40;
+        padding-left: 1rem; /* Less padding on mobile */
+        padding-right: 1rem;
+    }
+    
+    footer.download-footer .footer-grid {
+        gap: 1rem; /* Smaller gap on mobile */
     }
 
-    .history-thumbnail {
-        width: 80px;
-    }
-
-    /* Make history page heading smaller on mobile */
-    .padding .row h5 {
-        font-size: 1.2rem;
-    }
-
-    /* Make history item text smaller on mobile */
-    .history-item p.bold {
-        font-size: 0.85rem;
-    }
-
-    .history-item p.small {
-        font-size: 0.7rem;
-    }
-
-    /* Prevent header/button overflow (history clear button, etc.) */
-    .padding .row {
-        min-width: 0;
-        gap: 8px;
-        flex-wrap: nowrap;
-    }
-
-    .padding .row .max {
-        min-width: 0;
-    }
-
-    .padding .row h5.max {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .padding .row button {
-        flex-shrink: 0;
-        max-width: 100%;
-    }
-
-    /* Responsive dialog width on mobile */
-    dialog {
-        max-width: calc(100vw - 32px);
-    }
-
-    dialog nav {
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-
-    dialog .field {
-        max-width: 100%;
-    }
+    .history-thumbnail { width: 80px; }
+    .padding .row h5 { font-size: 1.2rem; }
+    .history-item p.bold { font-size: 0.85rem; }
+    .history-item p.small { font-size: 0.7rem; }
+    .padding .row { min-width: 0; gap: 8px; flex-wrap: nowrap; }
+    .padding .row .max { min-width: 0; }
+    .padding .row h5.max { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .padding .row button { flex-shrink: 0; max-width: 100%; }
+    dialog { max-width: calc(100vw - 32px); }
+    dialog nav { flex-wrap: wrap; gap: 8px; }
+    dialog .field { max-width: 100%; }
 }
 
-/* Ripple Effect */
-.ripple {
-    position: absolute;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(0);
-    animation: ripple 0.6s linear;
-    pointer-events: none;
-}
-
-@keyframes ripple {
-    to {
-        transform: scale(4);
-        opacity: 0;
-    }
-}
-
-/* Modal Overlay */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 99;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s;
-}
-
-.modal-overlay.active {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.modal-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 101; /* Ensure button is above dialog content */
-}
-
-/* Transitions */
-.page-enter-active {
-    animation: fade-in 0.3s ease-out;
-}
-
-@keyframes fade-in {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.error-enter-active {
-    animation: shake 0.4s ease-in-out;
-}
-
-@keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
-}
+/* Ripple & Animations (Existing) */
+.ripple { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, 0.3); transform: scale(0); animation: ripple 0.6s linear; pointer-events: none; }
+@keyframes ripple { to { transform: scale(4); opacity: 0; } }
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 99; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.modal-overlay.active { opacity: 1; pointer-events: auto; }
+.modal-close { position: absolute; top: 8px; right: 8px; z-index: 101; }
+.page-enter-active { animation: fade-in 0.3s ease-out; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.error-enter-active { animation: shake 0.4s ease-in-out; }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
