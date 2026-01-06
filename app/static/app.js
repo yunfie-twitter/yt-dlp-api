@@ -4,7 +4,7 @@
  * Optimizations: granular reactivity, minimal re-renders, cancellable requests
  */
 
-const { createApp, ref, computed, onMounted, onUnmounted } = Vue
+const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue
 const { 
     useStorage, 
     useDark, 
@@ -15,6 +15,55 @@ const {
 
 createApp({
     setup() {
+        // --- i18n Logic Start ---
+        const currentLocale = useStorage('locale', 'ja')
+        const translations = ref({})
+        const isLocalesLoading = ref(true)
+
+        const loadTranslations = async (lang) => {
+            isLocalesLoading.value = true
+            try {
+                // Determine path - handle both dev and prod paths if necessary
+                // Assuming standard static serving
+                const response = await axios.get(`locales/${lang}.json?v=${Date.now()}`) // Cache bust for development
+                translations.value = response.data
+                dayjs.locale(lang) // Update dayjs locale
+            } catch (e) {
+                console.error(`Failed to load translations for ${lang}`, e)
+                // Fallback to ja if en fails, or keep current
+                if (lang !== 'ja') {
+                    await loadTranslations('ja')
+                }
+            } finally {
+                isLocalesLoading.value = false
+            }
+        }
+
+        const t = (key) => {
+            if (isLocalesLoading.value) return '' // or a loader placeholder
+            const keys = key.split('.')
+            let value = translations.value
+            for (const k of keys) {
+                if (value && value[k]) {
+                    value = value[k]
+                } else {
+                    return key // Fallback to key if not found
+                }
+            }
+            return value
+        }
+
+        const changeLanguage = async (lang) => {
+            currentLocale.value = lang
+            await loadTranslations(lang)
+        }
+
+        // Initialize translations
+        onMounted(() => {
+            loadTranslations(currentLocale.value)
+        })
+        // --- i18n Logic End ---
+
         // API Base URL management with localStorage
         const defaultApiBase = window.location.origin
         const apiBaseUrl = useStorage('apiBaseUrl', defaultApiBase)
@@ -85,7 +134,7 @@ createApp({
                     showDisconnectNotification()
                 }
                 
-                const message = error.response?.data?.detail || error.message || 'リクエストに失敗しました'
+                const message = error.response?.data?.detail || error.message || t('messages.request_failed')
                 return Promise.reject(new Error(message))
             }
         )
@@ -265,12 +314,12 @@ createApp({
             try {
                 const text = await navigator.clipboard.readText()
                 if (!text) {
-                    triggerError('クリップボードが空です')
+                    triggerError(t('messages.clipboard_empty'))
                     return
                 }
                 url.value = text
             } catch (e) {
-                triggerError('クリップボードからの読み取りに失敗しました')
+                triggerError(t('messages.clipboard_error'))
             }
         }
 
@@ -400,7 +449,7 @@ createApp({
                         setTimeout(() => {
                             resetProgress()
                             if (data.status === 'error') {
-                                triggerError(data.message || 'ダウンロード中にエラーが発生しました')
+                                triggerError(data.message || t('messages.download_error'))
                             }
                         }, 2000)
                     }
@@ -475,7 +524,7 @@ createApp({
             if (!currentTaskId.value) return
             
             progressStatus.value = 'cancelling'
-            progressMessage.value = 'キャンセル中...'
+            progressMessage.value = t('messages.cancelling')
             
             try {
                 await api.post(`/download/cancel/${currentTaskId.value}`)
@@ -496,7 +545,7 @@ createApp({
             // Initialize progress
             progressStatus.value = 'queued'
             progressValue.value = 0
-            progressMessage.value = 'ダウンロードを開始しています...'
+            progressMessage.value = t('messages.download_started')
             
             try {
                 const payload = { url: url.value }
@@ -571,7 +620,9 @@ createApp({
             // Disconnected toast
             showDisconnectedToast, isMobileOrTablet,
             // Error Modal
-            showErrorModal, closeErrorModal
+            showErrorModal, closeErrorModal,
+            // i18n
+            t, currentLocale, changeLanguage, isLocalesLoading
         }
     }
 }).mount('#app')
