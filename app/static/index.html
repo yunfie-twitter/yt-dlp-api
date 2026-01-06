@@ -238,6 +238,12 @@
             </nav>
         </div>
 
+        <!-- Connection Toast -->
+        <div v-if="showDisconnectedToast" :class="['conn-toast', isMobileOrTablet() ? 'mobile' : 'desktop']">
+            <i>cloud_off</i>
+            <span>サーバーとの接続が切断されました</span>
+        </div>
+
         <!-- Modal Overlays -->
         <div class="modal-overlay" :class="{ active: showDeleteModal }" @click="showDeleteModal = false"></div>
         <div class="modal-overlay" :class="{ active: showSettingsModal }" @click="showSettingsModal = false"></div>
@@ -280,10 +286,28 @@
             </div>
 
             <div class="settings-item">
+                <h6>APIサーバー</h6>
+                <div class="field label border" style="margin-top: 0.5rem;">
+                    <input v-model="apiBaseUrl" @change="saveApiBase" type="text">
+                    <label>APIベースURL</label>
+                </div>
+                <p class="small" style="margin-top: 0.5rem; color: var(--on-surface-variant);">
+                    <i>info</i>
+                    <span>デフォルト: {{ defaultApiBase }}</span>
+                </p>
+                <nav style="margin-top: 0.5rem;">
+                    <button @click="addRipple($event); resetApiBase()" class="border small">
+                        <i>restart_alt</i>
+                        <span>リセット</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="settings-item">
                 <h6>情報</h6>
                 <p class="small">
                     <i>info</i>
-                    <span>バージョン 2.1.0</span>
+                    <span>バージョン 2.2.0</span>
                 </p>
                 <p class="small">
                     <i>code</i>
