@@ -113,11 +113,11 @@ footer.download-footer {
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--surface-container-highest);
     border-top: 1px solid var(--outline-variant);
-    z-index: 50;
+    z-index: 0;
     height: var(--download-footer-height);
     display: flex;
-    align-items: center; /* Vertically center the main row */
-    padding-left: 1.5rem;
+    align-items: center;
+    padding-left: 6rem;
     padding-right: 1.5rem;
 }
 
