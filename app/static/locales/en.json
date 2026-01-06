@@ -1,79 +1,74 @@
 {
-  "common": {
-    "home": "Home",
-    "history": "History",
-    "github": "GitHub",
-    "theme": "Theme",
-    "settings": "Settings",
-    "cancel": "Cancel",
-    "delete": "Delete",
-    "close": "Close",
-    "back": "Back",
-    "next": "Next",
-    "finish": "Finish",
-    "error": "Error",
-    "version": "Version"
-  },
-  "home": {
-    "title": "Enter Video URL",
-    "placeholder": "Paste YouTube or other video URL",
-    "paste": "Paste",
-    "analyze": "Analyze",
-    "best_quality": "Best Quality",
-    "audio_only": "Audio Only (MP3)",
-    "download": "Download",
-    "views": "views",
-    "unknown_uploader": "Unknown Uploader",
-    "live": "Live"
-  },
-  "history": {
-    "title": "Download History",
-    "clear": "Clear History",
-    "empty": "No download history yet",
-    "back_home": "Back to Home",
-    "confirm_title": "Clear History?",
-    "confirm_message": "All download history will be deleted. This action cannot be undone."
-  },
-  "download": {
-    "cancel_title": "Cancel Download?",
-    "cancel_message": "The download in progress will be stopped."
-  },
-  "setup": {
-    "welcome": "Welcome",
-    "welcome_message": "Welcome to yt-dlp Web Client!\nLet's get started with the initial setup.",
-    "step_language": "Language",
-    "step_api": "API Server",
-    "language_title": "Select Language",
-    "language_description": "Choose your preferred language",
-    "api_title": "API Server URL",
-    "api_description": "Usually no change is needed. Only modify if using a custom server.",
-    "api_placeholder": "https://example.com",
-    "setup_complete": "Setup Complete!",
-    "setup_complete_message": "Configuration is complete.\nLet's start downloading!"
-  },
-  "settings": {
-    "language": "Language",
-    "change_language": "Change display language",
-    "appearance": "Appearance",
-    "change_theme": "Toggle dark/light mode",
-    "dark_mode": "Dark Mode",
-    "light_mode": "Light Mode",
-    "api_server": "API Server",
-    "api_base_url": "API Base URL",
-    "default": "Default",
-    "reset": "Reset",
-    "info": "Information",
-    "repository": "GitHub Repository",
-    "libraries": "Libraries Used"
-  },
-  "messages": {
-    "clipboard_empty": "Clipboard is empty",
-    "clipboard_error": "Failed to read clipboard",
-    "download_started": "Download started",
-    "download_error": "An error occurred during download",
-    "cancelling": "Cancelling...",
-    "cancel_failed": "Failed to cancel",
-    "request_failed": "Request failed",
-    "disconnected": "Unable to connect to server"
-  }
+    "common": {
+        "home": "Home",
+        "history": "History",
+        "settings": "Settings",
+        "theme": "Theme",
+        "github": "GitHub",
+        "version": "Version",
+        "close": "Close",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "error": "Error",
+        "next": "Next",
+        "back": "Back",
+        "finish": "Finish"
+    },
+    "home": {
+        "title": "Download Video",
+        "placeholder": "Enter YouTube URL...",
+        "paste": "Paste",
+        "analyze": "Analyze",
+        "download": "Download",
+        "best_quality": "Best Quality",
+        "audio_only": "Audio Only (MP3)",
+        "unknown_uploader": "Unknown Uploader",
+        "views": "views",
+        "live": "Live Stream"
+    },
+    "history": {
+        "title": "Download History",
+        "clear": "Clear History",
+        "empty": "No history available",
+        "back_home": "Back to Home",
+        "confirm_title": "Clear History",
+        "confirm_message": "Are you sure you want to delete all history?"
+    },
+    "settings": {
+        "language": "Language",
+        "change_language": "Change app language",
+        "appearance": "Appearance",
+        "change_theme": "Toggle dark/light mode",
+        "dark_mode": "Dark Mode",
+        "light_mode": "Light Mode",
+        "api_server": "API Server",
+        "api_base_url": "API URL",
+        "default": "Default",
+        "reset": "Reset",
+        "info": "App Info",
+        "repository": "View Source Code",
+        "libraries": "Libraries Used"
+    },
+    "setup": {
+        "welcome": "Welcome",
+        "welcome_message": "Let's get started with the initial setup.\nIt will only take a few simple steps.",
+        "language_title": "Select Language",
+        "language_description": "Please select your preferred language.",
+        "api_title": "API Setup",
+        "api_description": "Configure the API server URL. Usually you don't need to change this."
+    },
+    "download": {
+        "cancel_title": "Cancel Download",
+        "cancel_message": "Are you sure you want to cancel the download?"
+    },
+    "messages": {
+        "clipboard_empty": "Clipboard is empty",
+        "clipboard_error": "Failed to read clipboard",
+        "request_failed": "Request failed",
+        "download_started": "Download started...",
+        "download_error": "Error occurred during download",
+        "cancelling": "Cancelling...",
+        "cancel_failed": "Failed to cancel",
+        "disconnected": "Disconnected from server"
+    }
 }
