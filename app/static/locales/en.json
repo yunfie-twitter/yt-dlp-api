@@ -1,60 +1,64 @@
 {
-    "common": {
-        "home": "Home",
-        "history": "History",
-        "github": "GitHub",
-        "theme": "Theme",
-        "settings": "Settings",
-        "close": "Close",
-        "cancel": "Cancel",
-        "delete": "Delete",
-        "error": "Error",
-        "version": "Version"
-    },
-    "home": {
-        "title": "Enter Video URL",
-        "placeholder": "YouTube, NicoNico, Twitter, etc.",
-        "paste": "Paste",
-        "analyze": "Analyze",
-        "download": "Download",
-        "best_quality": "Best Quality",
-        "audio_only": "Audio Only",
-        "unknown_uploader": "Unknown",
-        "views": "views",
-        "live": "LIVE"
-    },
-    "history": {
-        "title": "Download History",
-        "clear": "Clear",
-        "empty": "No History",
-        "back_home": "Back to Home",
-        "confirm_title": "Clear History",
-        "confirm_message": "Are you sure you want to delete all download history?"
-    },
-    "settings": {
-        "appearance": "Appearance",
-        "change_theme": "Change Theme",
-        "dark_mode": "Dark Mode",
-        "light_mode": "Light Mode",
-        "api_server": "API Server",
-        "api_base_url": "API Base URL",
-        "default": "Default",
-        "reset": "Reset",
-        "info": "Info",
-        "libraries": "Libraries Used",
-        "repository": "GitHub Repository",
-        "language": "Language",
-        "change_language": "Change Display Language"
-    },
-    "messages": {
-        "clipboard_error": "Failed to read from clipboard",
-        "clipboard_empty": "Clipboard is empty",
-        "disconnected": "Disconnected from server",
-        "processing": "Processing...",
-        "cancelling": "Cancelling...",
-        "download_started": "Starting download...",
-        "request_failed": "Request failed",
-        "download_error": "Error occurred during download",
-        "unknown_error": "Unknown error occurred"
-    }
+  "common": {
+    "home": "Home",
+    "history": "History",
+    "github": "GitHub",
+    "theme": "Theme",
+    "settings": "Settings",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "close": "Close",
+    "back": "Back",
+    "error": "Error",
+    "version": "Version"
+  },
+  "home": {
+    "title": "Enter Video URL",
+    "placeholder": "Paste YouTube or other video URL",
+    "paste": "Paste",
+    "analyze": "Analyze",
+    "best_quality": "Best Quality",
+    "audio_only": "Audio Only (MP3)",
+    "download": "Download",
+    "views": "views",
+    "unknown_uploader": "Unknown Uploader",
+    "live": "Live"
+  },
+  "history": {
+    "title": "Download History",
+    "clear": "Clear History",
+    "empty": "No download history yet",
+    "back_home": "Back to Home",
+    "confirm_title": "Clear History?",
+    "confirm_message": "All download history will be deleted. This action cannot be undone."
+  },
+  "download": {
+    "cancel_title": "Cancel Download?",
+    "cancel_message": "The download in progress will be stopped."
+  },
+  "settings": {
+    "language": "Language",
+    "change_language": "Change display language",
+    "appearance": "Appearance",
+    "change_theme": "Toggle dark/light mode",
+    "dark_mode": "Dark Mode",
+    "light_mode": "Light Mode",
+    "api_server": "API Server",
+    "api_base_url": "API Base URL",
+    "default": "Default",
+    "reset": "Reset",
+    "info": "Information",
+    "repository": "GitHub Repository",
+    "libraries": "Libraries Used"
+  },
+  "messages": {
+    "clipboard_empty": "Clipboard is empty",
+    "clipboard_error": "Failed to read clipboard",
+    "download_started": "Download started",
+    "download_error": "An error occurred during download",
+    "cancelling": "Cancelling...",
+    "cancel_failed": "Failed to cancel",
+    "request_failed": "Request failed",
+    "disconnected": "Unable to connect to server"
+  }
 }
