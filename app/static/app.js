@@ -15,17 +15,76 @@ const {
 
 createApp({
     setup() {
+        // API Base URL management with localStorage
+        const defaultApiBase = window.location.origin
+        const apiBaseUrl = useStorage('apiBaseUrl', defaultApiBase)
+        
+        const getApiBase = () => {
+            return apiBaseUrl.value || defaultApiBase
+        }
+        
+        const saveApiBase = () => {
+            // Remove trailing slashes
+            apiBaseUrl.value = apiBaseUrl.value.replace(/\/+$/, '')
+        }
+        
+        const resetApiBase = () => {
+            apiBaseUrl.value = defaultApiBase
+        }
+
         // API client with axios (singleton)
         const api = axios.create({
             timeout: 15000,
             headers: { 'Content-Type': 'application/json' }
         })
+        
+        // Update base URL dynamically
+        api.interceptors.request.use(config => {
+            config.baseURL = getApiBase()
+            return config
+        })
 
-        // Add response interceptor for error handling
+        // Disconnected toast state
+        const showDisconnectedToast = ref(false)
+        let disconnectToastTimeout = null
+        
+        const showDisconnectNotification = () => {
+            showDisconnectedToast.value = true
+            // Clear any existing hide timeout
+            if (disconnectToastTimeout) {
+                clearTimeout(disconnectToastTimeout)
+                disconnectToastTimeout = null
+            }
+        }
+        
+        const hideDisconnectNotification = () => {
+            // Delay hiding to avoid flicker
+            if (disconnectToastTimeout) {
+                clearTimeout(disconnectToastTimeout)
+            }
+            disconnectToastTimeout = setTimeout(() => {
+                showDisconnectedToast.value = false
+            }, 500)
+        }
+        
+        const isMobileOrTablet = () => {
+            return window.matchMedia('(max-width: 1024px) and (pointer: coarse)').matches
+        }
+
+        // Add response interceptor for error handling + disconnect detection
         api.interceptors.response.use(
-            response => response,
+            response => {
+                hideDisconnectNotification()
+                return response
+            },
             error => {
                 console.error('API Error:', error)
+                
+                // Network error or timeout
+                if (!error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') {
+                    showDisconnectNotification()
+                }
+                
                 const message = error.response?.data?.detail || error.message || 'リクエストに失敗しました'
                 return Promise.reject(new Error(message))
             }
@@ -263,7 +322,9 @@ createApp({
         
         const connectWebSocket = (taskId) => {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-            const wsUrl = `${protocol}//${window.location.host}/download/progress/ws/${taskId}`
+            const apiBase = getApiBase()
+            const host = apiBase.replace(/^https?:\/\//, '')
+            const wsUrl = `${protocol}//${host}/download/progress/ws/${taskId}`
             
             // Close existing connection if any
             if (ws) {
@@ -280,6 +341,7 @@ createApp({
             
             ws.addEventListener('open', () => {
                 console.log('WebSocket connected')
+                hideDisconnectNotification()
             })
             
             ws.addEventListener('message', (event) => {
@@ -325,10 +387,15 @@ createApp({
             
             ws.addEventListener('error', (error) => {
                 console.error('WebSocket error:', error)
+                showDisconnectNotification()
             })
             
-            ws.addEventListener('close', () => {
-                console.log('WebSocket disconnected')
+            ws.addEventListener('close', (event) => {
+                console.log('WebSocket disconnected', event.code)
+                // Only show disconnect if it wasn't a normal closure
+                if (event.code !== 1000 && event.code !== 1001) {
+                    showDisconnectNotification()
+                }
             })
 
             // Send ping every 30 seconds
@@ -361,7 +428,7 @@ createApp({
         // Download
         const triggerBrowserDownload = (taskId) => {
             const a = document.createElement('a')
-            a.href = `/download/file/${taskId}`
+            a.href = `${getApiBase()}/download/file/${taskId}`
             a.style.display = 'none'
             document.body.appendChild(a)
             a.click()
@@ -460,6 +527,11 @@ createApp({
                 ws.close()
                 ws = null
             }
+            
+            // Clear disconnect toast timeout
+            if (disconnectToastTimeout) {
+                clearTimeout(disconnectToastTimeout)
+            }
         })
 
         // Return public API
@@ -469,7 +541,11 @@ createApp({
             availableQualities, currentTaskId, hasInfo,
             fetchInfo: fetchInfoImmediate, formatDuration, download, cancelDownload, navigateToPage,
             pasteFromClipboard, confirmClearHistory, clearHistory, deleteHistoryItem, loadFromHistory, 
-            toggleTheme, toggleThemeManual, addRipple, formatTimestamp, formatRelativeTime
+            toggleTheme, toggleThemeManual, addRipple, formatTimestamp, formatRelativeTime,
+            // API Base URL management
+            apiBaseUrl, defaultApiBase, saveApiBase, resetApiBase,
+            // Disconnected toast
+            showDisconnectedToast, isMobileOrTablet
         }
     }
 }).mount('#app')
