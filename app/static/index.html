@@ -169,8 +169,8 @@
             </main>
 
             <!-- Download Progress Footer -->
-            <footer v-if="downloadProgress">
-                <nav>
+            <footer v-if="downloadProgress" class="download-footer">
+                <div class="footer-row">
                     <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
                         <i class="green-text">check_circle</i>
                     </button>
@@ -180,13 +180,10 @@
                     <button class="circle transparent" v-else>
                         <i>downloading</i>
                     </button>
-                    
+
                     <div class="progress-info">
                         <div class="progress-text">
                             <strong>{{ downloadProgress.filename || t('messages.processing') }}</strong>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
                         </div>
                         <div class="progress-stats">
                             <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
@@ -195,9 +192,7 @@
                             <span v-if="downloadProgress.message">・ {{ downloadProgress.message }}</span>
                         </div>
                     </div>
-                    
-                    <div class="max"></div>
-                    
+
                     <button 
                         v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
                         @click="addRipple($event); cancelDownload()" 
@@ -206,7 +201,13 @@
                         title="キャンセル">
                         <i>close</i>
                     </button>
-                </nav>
+                </div>
+
+                <div class="footer-bar">
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                    </div>
+                </div>
             </footer>
         </div>
 
