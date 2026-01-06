@@ -55,8 +55,12 @@ class DownloadService:
         _ = functools.partial(i18n.get, locale=locale)
         safe_url = safe_url_for_log(intent.url)
         
+        # Log: Download started
+        log_info(request, f"[DOWNLOAD START] Task: {task_id} | URL: {safe_url}")
+        
         # Update status: fetching info
         download_tasks[task_id]['status'] = 'fetching_info'
+        download_tasks[task_id]['url'] = intent.url
         await DownloadService.broadcast_progress(task_id, {
             'status': 'fetching_info',
             'progress': 5,
@@ -65,9 +69,9 @@ class DownloadService:
         
         # 1. Determine Format String
         try:
-            log_info(request, f"Determining format for {safe_url}")
+            log_info(request, f"[FORMAT] Task: {task_id} | Determining format for {safe_url}")
             format_str = FormatDecision.decide(intent)
-            log_info(request, f"Format decided: {format_str} for {safe_url}")
+            log_info(request, f"[FORMAT] Task: {task_id} | Format decided: {format_str}")
             
             await DownloadService.broadcast_progress(task_id, {
                 'status': 'fetching_info',
@@ -75,7 +79,7 @@ class DownloadService:
                 'message': f'フォーマット決定: {format_str} (1/3)'
             })
         except Exception as e:
-            log_error(request, f"Format decision error: {str(e)}")
+            log_error(request, f"[FORMAT ERROR] Task: {task_id} | {str(e)}")
             raise Exception(f"フォーマット決定エラー: {str(e)}")
         
         # 2. Get Filename (metadata)
@@ -87,7 +91,7 @@ class DownloadService:
         
         filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
         try:
-            log_info(request, f"Fetching filename for {safe_url}")
+            log_info(request, f"[METADATA] Task: {task_id} | Fetching filename for {safe_url}")
             result = await asyncio.wait_for(
                 SubprocessExecutor.run(filename_cmd, timeout=15.0),
                 timeout=20.0
@@ -104,20 +108,22 @@ class DownloadService:
                     root, _ = os.path.splitext(filename)
                     filename = f"{root}.mp3"
                     
-                log_info(request, f"Filename resolved: {filename}")
+                log_info(request, f"[METADATA] Task: {task_id} | Video Title: {raw_filename}")
+                log_info(request, f"[METADATA] Task: {task_id} | Sanitized Filename: {filename}")
             else:
                 raise Exception("Filename retrieval failed")
         except asyncio.TimeoutError:
-            log_error(request, f"Filename fetch timeout for {safe_url}")
+            log_error(request, f"[METADATA TIMEOUT] Task: {task_id} | Filename fetch timeout for {safe_url}")
             video_id = hash_stable(intent.url)[:8]
             ext = intent.file_format if intent.file_format else ('mp3' if intent.audio_only else 'mp4')
             filename = f"video_{video_id}.{ext}"
+            log_info(request, f"[METADATA] Task: {task_id} | Fallback filename: {filename}")
         except Exception as e:
-            log_error(request, f"Filename error: {str(e)}")
+            log_error(request, f"[METADATA ERROR] Task: {task_id} | {str(e)}")
             video_id = hash_stable(intent.url)[:8]
             ext = intent.file_format if intent.file_format else ('mp3' if intent.audio_only else 'mp4')
             filename = f"video_{video_id}.{ext}"
-            log_info(request, f"Fallback filename: {filename}")
+            log_info(request, f"[METADATA] Task: {task_id} | Fallback filename: {filename}")
 
         await DownloadService.broadcast_progress(task_id, {
             'status': 'fetching_info',
@@ -149,10 +155,12 @@ class DownloadService:
         cmd = [c for c in cmd if c != '--no-progress']
         cmd.extend(['--newline', '--progress'])
         
-        log_info(request, f"Starting download with aria2c to temp: {temp_path_template}")
+        log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c (16 connections)")
+        log_info(request, f"[DOWNLOAD] Task: {task_id} | Temp path: {temp_path_template}")
         
         download_tasks[task_id]['status'] = 'downloading'
         download_tasks[task_id]['filename'] = filename
+        download_tasks[task_id]['video_title'] = filename  # Store original title
         
         await DownloadService.broadcast_progress(task_id, {
             'status': 'downloading',
@@ -226,6 +234,7 @@ class DownloadService:
                             
                     # Check for "Destination" line (processing)
                     elif 'Destination:' in decoded or 'Merging' in decoded:
+                        log_info(request, f"[PROCESSING] Task: {task_id} | Post-processing started")
                         await DownloadService.broadcast_progress(task_id, {
                             'status': 'processing',
                             'progress': 95,
@@ -233,7 +242,7 @@ class DownloadService:
                         })
                         
             except Exception as e:
-                log_error(request, f"Progress parsing error: {str(e)}")
+                log_error(request, f"[PROGRESS ERROR] Task: {task_id} | {str(e)}")
         
         async def drain_stderr():
             try:
@@ -256,10 +265,12 @@ class DownloadService:
             
             # Check if cancelled
             if download_tasks[task_id].get('cancelled', False):
+                log_info(request, f"[CANCELLED] Task: {task_id}")
                 raise Exception("ダウンロードがキャンセルされました")
             
             if returncode != 0:
                 error_summary = '\n'.join(stderr_lines)
+                log_error(request, f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {returncode} | Error: {error_summary[:200]}")
                 download_tasks[task_id]['status'] = 'error'
                 download_tasks[task_id]['error'] = error_summary[:200]
                 await DownloadService.broadcast_progress(task_id, {
@@ -272,6 +283,8 @@ class DownloadService:
             download_tasks[task_id]['progress'] = 100.0
             download_tasks[task_id]['status'] = 'completed'
             
+            log_info(request, f"[DOWNLOAD COMPLETE] Task: {task_id} | Filename: {filename}")
+            
             await DownloadService.broadcast_progress(task_id, {
                 'status': 'completed',
                 'progress': 100,
@@ -280,14 +293,14 @@ class DownloadService:
             })
                 
         except asyncio.TimeoutError:
-            log_error(request, f"Download timeout after {DOWNLOAD_TIMEOUT}s")
+            log_error(request, f"[TIMEOUT] Task: {task_id} | Download timeout after {DOWNLOAD_TIMEOUT}s")
             download_tasks[task_id]['status'] = 'error'
             download_tasks[task_id]['error'] = 'Download timeout'
             process.kill()
             await process.wait()
             raise Exception("ダウンロードがタイムアウトしました")
         except Exception as e:
-            log_error(request, f"Process error: {str(e)}")
+            log_error(request, f"[PROCESS ERROR] Task: {task_id} | {str(e)}")
             download_tasks[task_id]['status'] = 'error'
             download_tasks[task_id]['error'] = str(e)
             if process.returncode is None:
@@ -304,6 +317,7 @@ class DownloadService:
         # 5. Find the generated file
         found_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(temp_id)]
         if not found_files:
+            log_error(request, f"[FILE NOT FOUND] Task: {task_id} | No file found after download")
             raise HTTPException(status_code=500, detail="ダウンロード完了後にファイルが見つかりません")
         
         final_temp_path = os.path.join(TEMP_DIR, found_files[0])
@@ -312,7 +326,7 @@ class DownloadService:
         download_tasks[task_id]['file_path'] = final_temp_path
         download_tasks[task_id]['file_size'] = file_size
         
-        log_info(request, f"Download finished: {file_size / 1024 / 1024:.1f} MB")
+        log_info(request, f"[DOWNLOAD SUCCESS] Task: {task_id} | Size: {file_size / 1024 / 1024:.1f} MB | Path: {final_temp_path}")
         
         return final_temp_path, filename, file_size
     
@@ -365,6 +379,8 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'speed': None,
         'eta': None,
         'filename': None,
+        'video_title': None,
+        'url': str(video_request.url),
         'file_path': None,
         'file_size': None,
         'error': None,
@@ -373,7 +389,7 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'created_at': time.time()
     }
     
-    log_info(request, f"Created download task: {task_id}")
+    log_info(request, f"[TASK CREATED] Task ID: {task_id} | URL: {safe_url_for_log(str(video_request.url))}")
     
     # Start background download
     async def background_download():
@@ -381,7 +397,7 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
             intent = video_request.to_intent()
             await DownloadService.download_with_progress(intent, locale, request, task_id)
         except Exception as e:
-            log_error(request, f"Download error for task {task_id}: {str(e)}")
+            log_error(request, f"[BACKGROUND ERROR] Task: {task_id} | {str(e)}")
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'error'
                 download_tasks[task_id]['error'] = str(e)
@@ -399,8 +415,56 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'message': 'Download task created'
     })
 
+@router.get("/task/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    Get status of a specific download task
+    """
+    
+    if task_id not in download_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task_info = download_tasks[task_id]
+    
+    return JSONResponse({
+        'task_id': task_id,
+        'status': task_info['status'],
+        'progress': task_info['progress'],
+        'speed': task_info.get('speed'),
+        'eta': task_info.get('eta'),
+        'filename': task_info.get('filename'),
+        'video_title': task_info.get('video_title'),
+        'url': safe_url_for_log(task_info.get('url', '')),
+        'file_size': task_info.get('file_size'),
+        'error': task_info.get('error'),
+        'created_at': task_info['created_at']
+    })
+
+@router.get("/task/lists")
+async def list_tasks():
+    """
+    List all active download tasks
+    """
+    
+    tasks = []
+    for task_id, task_info in download_tasks.items():
+        tasks.append({
+            'task_id': task_id,
+            'status': task_info['status'],
+            'progress': task_info['progress'],
+            'filename': task_info.get('filename'),
+            'video_title': task_info.get('video_title'),
+            'url': safe_url_for_log(task_info.get('url', '')),
+            'created_at': task_info['created_at']
+        })
+    
+    return JSONResponse({
+        'total': len(tasks),
+        'tasks': tasks
+    })
+
 @router.post("/download/cancel/{task_id}")
-async def cancel_download(task_id: str):
+async def cancel_download(task_id: str, request: Request):
     """
     Cancel an ongoing download
     """
@@ -409,6 +473,8 @@ async def cancel_download(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     
     task_info = download_tasks[task_id]
+    
+    log_info(request, f"[CANCEL REQUEST] Task: {task_id}")
     
     # Mark as cancelled
     task_info['cancelled'] = True
@@ -419,6 +485,7 @@ async def cancel_download(task_id: str):
         try:
             process.kill()
             await process.wait()
+            log_info(request, f"[CANCELLED] Task: {task_id} | Process killed")
         except:
             pass
     
@@ -500,7 +567,7 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
         # DO NOT delete task info here - keep it until file is downloaded
 
 @router.get("/download/file/{task_id}")
-async def download_file(task_id: str):
+async def download_file(task_id: str, request: Request):
     """
     Download the completed file (browser native download)
     """
@@ -520,6 +587,8 @@ async def download_file(task_id: str):
     filename = task_info['filename']
     file_size = task_info['file_size']
     
+    log_info(request, f"[FILE TRANSFER START] Task: {task_id} | Filename: {filename} | Size: {file_size / 1024 / 1024:.1f} MB")
+    
     async def generate():
         try:
             async with aiofiles.open(file_path, 'rb') as f:
@@ -529,6 +598,7 @@ async def download_file(task_id: str):
                         break
                     yield chunk
         finally:
+            log_info(request, f"[FILE TRANSFER COMPLETE] Task: {task_id}")
             # Cleanup after download
             with suppress(OSError):
                 os.remove(file_path)
@@ -607,6 +677,7 @@ async def download_video_legacy(request: Request, video_request: VideoRequest):
     download_tasks[task_id] = {
         'status': 'downloading',
         'progress': 0.0,
+        'url': str(video_request.url),
         'created_at': time.time()
     }
     
