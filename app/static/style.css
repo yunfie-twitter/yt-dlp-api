@@ -49,7 +49,7 @@
     background: #b71c1c; /* Error red for high visibility */
 }
 
-/* 3. Dialog motion (subtle) + center alignment */
+/* 3. Dialog motion (subtle) + center alignment - Unified for all devices */
 dialog {
     z-index: 100;
     box-sizing: border-box;
@@ -68,29 +68,6 @@ dialog.active {
     opacity: 1;
     transform: translate(-50%, -50%) translateY(0);
     pointer-events: auto;
-}
-
-/* 4. Settings Modal Full Screen on Mobile */
-@media (max-width: 480px) and (pointer: coarse) {
-    dialog.active {
-        /* Override default dialog styles for mobile fullscreen */
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: 100vw !important;
-        max-height: 100vh !important;
-        border-radius: 0 !important;
-        margin: 0 !important;
-        top: 0 !important;
-        left: 0 !important;
-        transform: none !important;
-        display: flex;
-        flex-direction: column;
-    }
-    
-    dialog.active > .max {
-        flex: 1;
-        overflow-y: auto;
-    }
 }
 
 /* Existing styles (preserved) */
@@ -235,8 +212,9 @@ main.responsive {
     opacity: 1;
 }
 
-/* Download Progress Footer - Redesigned Compact Layout */
+/* Download Progress Footer - Compact Single-Row Layout (All Devices) */
 footer.download-footer {
+    position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
@@ -398,9 +376,9 @@ footer.download-footer .progress-stats > span:first-child {
         max-width: 100%;
     }
 
-    /* Avoid right overflow inside dialogs on mobile */
+    /* Responsive dialog width on mobile */
     dialog {
-        max-width: 100vw;
+        max-width: calc(100vw - 32px);
     }
 
     dialog nav {
