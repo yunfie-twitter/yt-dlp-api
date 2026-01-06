@@ -266,7 +266,7 @@ footer nav {
     background: var(--surface-variant);
     border-radius: 2px;
     overflow: hidden;
-    width: 200%;
+    width: 100%;
 }
 
 .progress-bar-fill {
@@ -348,13 +348,18 @@ footer nav {
         width: 80px;
     }
 
+    /* Make history page heading smaller on mobile */
+    .padding .row h5 {
+        font-size: 1.2rem;
+    }
+
     /* Make history item text smaller on mobile */
     .history-item p.bold {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
 
     .history-item p.small {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
     }
 
     /* Prevent header/button overflow (history clear button, etc.) */
