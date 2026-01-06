@@ -9,6 +9,8 @@
     "delete": "削除",
     "close": "閉じる",
     "back": "戻る",
+    "next": "次へ",
+    "finish": "完了",
     "error": "エラー",
     "version": "バージョン"
   },
@@ -35,6 +37,19 @@
   "download": {
     "cancel_title": "ダウンロードをキャンセルしますか？",
     "cancel_message": "進行中のダウンロードが中止されます。"
+  },
+  "setup": {
+    "welcome": "ようこそ",
+    "welcome_message": "yt-dlp Web Clientへようこそ！\n初期設定を行いましょう。",
+    "step_language": "言語設定",
+    "step_api": "APIサーバー設定",
+    "language_title": "表示言語を選択",
+    "language_description": "お好みの言語を選んでください",
+    "api_title": "APIサーバーのURL",
+    "api_description": "通常は変更不要です。カスタムサーバーを使用する場合のみ変更してください。",
+    "api_placeholder": "https://example.com",
+    "setup_complete": "セットアップ完了！",
+    "setup_complete_message": "設定が完了しました。\nダウンロードを始めましょう！"
   },
   "settings": {
     "language": "言語",

@@ -9,6 +9,8 @@
     "delete": "Delete",
     "close": "Close",
     "back": "Back",
+    "next": "Next",
+    "finish": "Finish",
     "error": "Error",
     "version": "Version"
   },
@@ -35,6 +37,19 @@
   "download": {
     "cancel_title": "Cancel Download?",
     "cancel_message": "The download in progress will be stopped."
+  },
+  "setup": {
+    "welcome": "Welcome",
+    "welcome_message": "Welcome to yt-dlp Web Client!\nLet's get started with the initial setup.",
+    "step_language": "Language",
+    "step_api": "API Server",
+    "language_title": "Select Language",
+    "language_description": "Choose your preferred language",
+    "api_title": "API Server URL",
+    "api_description": "Usually no change is needed. Only modify if using a custom server.",
+    "api_placeholder": "https://example.com",
+    "setup_complete": "Setup Complete!",
+    "setup_complete_message": "Configuration is complete.\nLet's start downloading!"
   },
   "settings": {
     "language": "Language",
