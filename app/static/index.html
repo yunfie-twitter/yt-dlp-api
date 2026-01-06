@@ -168,53 +168,56 @@
                 <div class="space"></div>
             </main>
 
-            <!-- Download Progress Footer (3-Row Layout) -->
+            <!-- Download Progress Footer (3-Column Balanced Layout) -->
             <footer v-if="downloadProgress" class="download-footer">
-                <!-- Title Row -->
-                <div class="title-row">
-                    <div class="title-spacer"></div>
-                    <div class="download-title">
-                        {{ downloadProgress.filename || info?.title || '' }}
+                <div class="footer-grid">
+                    <!-- Column 1: Icon (Left Anchor) -->
+                    <div class="icon-col">
+                        <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
+                            <i class="green-text">check_circle</i>
+                        </button>
+                        <button class="circle transparent" v-else-if="downloadProgress.status === 'downloading'">
+                            <progress class="circle small"></progress>
+                        </button>
+                        <button class="circle transparent" v-else>
+                            <i>downloading</i>
+                        </button>
                     </div>
-                </div>
 
-                <!-- Progress Bar Row -->
-                <div class="progress-row">
-                    <!-- Status Icon -->
-                    <button class="circle transparent" v-if="downloadProgress.status === 'completed'">
-                        <i class="green-text">check_circle</i>
-                    </button>
-                    <button class="circle transparent" v-else-if="downloadProgress.status === 'downloading'">
-                        <progress class="circle small"></progress>
-                    </button>
-                    <button class="circle transparent" v-else>
-                        <i>downloading</i>
-                    </button>
+                    <!-- Column 2: Content (Center Main) -->
+                    <div class="content-col">
+                        <!-- Title -->
+                        <div class="download-title">
+                            {{ downloadProgress.filename || info?.title || '' }}
+                        </div>
+                        
+                        <!-- Progress Bar -->
+                        <div class="progress-bar-container">
+                            <div class="progress-bar">
+                                <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                            </div>
+                        </div>
 
-                    <!-- Progress Bar -->
-                    <div class="progress-bar-container">
-                        <div class="progress-bar">
-                            <div class="progress-bar-fill" :style="{ width: downloadProgress.progress + '%' }"></div>
+                        <!-- Stats -->
+                        <div class="stats-row">
+                            <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
+                            <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
+                            <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
+                            <span v-if="downloadProgress.message" class="stats-message">・ {{ downloadProgress.message }}</span>
                         </div>
                     </div>
 
-                    <!-- Close Button -->
-                    <button 
-                        v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
-                        @click="addRipple($event); cancelDownload()" 
-                        class="circle transparent"
-                        :disabled="downloadProgress.status === 'cancelling'"
-                        title="キャンセル">
-                        <i>close</i>
-                    </button>
-                </div>
-
-                <!-- Stats Row -->
-                <div class="stats-row">
-                    <span>{{ downloadProgress.progress?.toFixed(1) || 0 }}%</span>
-                    <span v-if="downloadProgress.speed">・ {{ downloadProgress.speed }}</span>
-                    <span v-if="downloadProgress.eta">・ ETA {{ downloadProgress.eta }}</span>
-                    <span v-if="downloadProgress.message" class="stats-message">・ {{ downloadProgress.message }}</span>
+                    <!-- Column 3: Close Button (Right Anchor) -->
+                    <div class="action-col">
+                        <button 
+                            v-if="downloadProgress.status === 'downloading' || downloadProgress.status === 'queued' || downloadProgress.status === 'fetching_info'"
+                            @click="addRipple($event); cancelDownload()" 
+                            class="circle transparent"
+                            :disabled="downloadProgress.status === 'cancelling'"
+                            title="キャンセル">
+                            <i>close</i>
+                        </button>
+                    </div>
                 </div>
             </footer>
         </div>
