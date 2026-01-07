@@ -435,7 +435,7 @@ createApp({
 
             try {
                 const response = await api.get('/search', { 
-                    params: { q: query, limit: 10 },
+                    params: { q: query, limit: 5 },
                     signal: abortController.signal 
                 })
                 
