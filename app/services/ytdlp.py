@@ -196,3 +196,29 @@ class YTDLPCommandBuilder:
                 cmd.extend(['--merge-output-format', 'mp4'])
 
         return cmd
+
+    @staticmethod
+    def build_search_command(query: str, limit: int = 5) -> List[str]:
+        """
+        Build command for searching videos
+        
+        Args:
+            query: Search query
+            limit: Maximum number of results
+        """
+        cmd = [
+            'yt-dlp',
+            f'ytsearch{limit}:{query}',
+            '--dump-json',
+            '--no-playlist',
+            '--socket-timeout', str(config.download.socket_timeout),
+            '--retries', str(config.download.retries),
+        ]
+        
+        if not config.ytdlp.enable_live_streams:
+            cmd.extend(['--match-filter', '!is_live'])
+            
+        if state.js_runtime:
+            cmd.extend(['--js-runtimes', state.js_runtime])
+            
+        return cmd
