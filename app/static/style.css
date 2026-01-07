@@ -5,6 +5,11 @@
     --download-footer-height: 88px; /* Taller for better vertical rhythm */
 }
 
+/* FOUC Prevention */
+[v-cloak] {
+    display: none !important;
+}
+
 /* App Loading Overlay */
 .app-root {
     width: 100%;
