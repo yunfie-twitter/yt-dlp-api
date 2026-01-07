@@ -16,15 +16,16 @@
     },
     "home": {
         "title": "動画をダウンロード",
-        "placeholder": "YouTubeなどのURLを入力...",
+        "placeholder": "動画URL または 検索ワードを入力...",
         "paste": "貼り付け",
-        "analyze": "解析",
+        "analyze": "解析 / 検索",
         "download": "ダウンロード",
         "best_quality": "最高画質",
         "audio_only": "音声のみ (MP3)",
         "unknown_uploader": "不明なアップロード者",
         "views": "回視聴",
-        "live": "ライブ配信"
+        "live": "ライブ配信",
+        "search_results": "検索結果"
     },
     "history": {
         "title": "ダウンロード履歴",
@@ -69,6 +70,7 @@
         "download_error": "ダウンロード中にエラーが発生しました",
         "cancelling": "キャンセル中...",
         "cancel_failed": "キャンセルに失敗しました",
-        "disconnected": "サーバーとの接続が切断されました"
+        "disconnected": "サーバーとの接続が切断されました",
+        "search_empty": "検索結果が見つかりませんでした"
     }
 }
