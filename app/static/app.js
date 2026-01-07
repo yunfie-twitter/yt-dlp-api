@@ -110,7 +110,7 @@ createApp({
 
         // API client with axios (singleton)
         const api = axios.create({
-            timeout: 15000,
+            timeout: 45000, // Increased to 45s to handle backend processing
             headers: { 'Content-Type': 'application/json' }
         })
         
