@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import health, info, download, admin, search
 from app.config.settings import config, CONFIG_PATH
+from app.infra.redis import init_redis, close_redis
 
 # 1. Create App
 app = FastAPI(
@@ -50,4 +51,8 @@ app.mount(
 @app.on_event("startup")
 async def startup_event():
     print(f"Loaded config from {CONFIG_PATH}")
-    # Removed incorrect API Key check to prevent startup error
+    await init_redis()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_redis()
