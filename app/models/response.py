@@ -18,3 +18,17 @@ class VideoInfo(BaseModel):
     is_live: bool = False
     formats: List[Dict[str, Any]]
     subtitles: Optional[Dict[str, Any]] = None
+
+class SearchResult(BaseModel):
+    id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    duration: Optional[int] = None
+    view_count: Optional[int] = None
+    uploader: Optional[str] = None
+    thumbnail: Optional[str] = None
+    webpage_url: str
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult]
