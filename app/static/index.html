@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>yt-dlp Web Client</title>
     
+    <!-- PWA Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#d0bcff">
+    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/download.svg">
+    
     <!-- External CSS -->
     <link href="https://cdn.jsdelivr.net/npm/beercss@3.13.1/dist/cdn/beer.min.css" rel="stylesheet">
     <link href="style.css" rel="stylesheet">
@@ -510,6 +515,15 @@
         dayjs.extend(window.dayjs_plugin_duration)
         dayjs.extend(window.dayjs_plugin_relativeTime)
         // Default locale will be set by app.js
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('SW registered!', reg))
+                    .catch(err => console.log('SW registration failed:', err));
+            });
+        }
     </script>
     
     <!-- Application JavaScript -->
