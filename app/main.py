@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import health, info, download, stream, admin
+from app.api import health, info, download, admin, search
 from app.config.settings import config, CONFIG_PATH
 
 # 1. Create App
@@ -27,7 +27,7 @@ app.add_middleware(
 app.include_router(health.router, tags=["Health"])
 app.include_router(info.router, tags=["Info"])
 app.include_router(download.router, tags=["Download"])
-app.include_router(stream.router, tags=["Stream"])
+app.include_router(search.router, tags=["Search"])
 app.include_router(admin.router, tags=["Admin"])
 
 # 4. Static Files & Web Client
