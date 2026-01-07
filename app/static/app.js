@@ -210,6 +210,9 @@ createApp({
         const url = ref('')
         const loading = ref(false)
         
+        // Search state
+        const searchResults = ref([])
+        
         // Error state for Modal
         const error = ref(null)
         const showErrorModal = ref(false)
@@ -408,9 +411,84 @@ createApp({
             }
         }
 
+        // Helper to validate URL
+        const isValidUrl = (string) => {
+            try {
+                const newUrl = new URL(string);
+                return newUrl.protocol === "http:" || newUrl.protocol === "https:";
+            } catch (_) {
+                return false;
+            }
+        }
+
+        // Search Videos
+        const searchVideos = async (query) => {
+            loading.value = true
+            searchResults.value = []
+            hasInfo.value = false // Hide video info if showing
+            
+            // Cancel previous request
+            if (abortController) {
+                abortController.abort()
+            }
+            abortController = new AbortController()
+
+            try {
+                const response = await api.get('/search', { 
+                    params: { q: query, limit: 10 },
+                    signal: abortController.signal 
+                })
+                
+                if (response.data.results && response.data.results.length > 0) {
+                    searchResults.value = response.data.results.map(r => ({
+                        ...r,
+                        title: sanitize(r.title),
+                        uploader: sanitize(r.uploader)
+                    }))
+                } else {
+                    triggerError(t('messages.search_empty') || '検索結果が見つかりませんでした')
+                }
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    triggerError(e.message)
+                }
+            } finally {
+                loading.value = false
+            }
+        }
+
+        // Select Search Result
+        const selectSearchResult = (result) => {
+            // Prefer webpage_url if available
+            const selectedUrl = result.webpage_url || result.url || `https://www.youtube.com/watch?v=${result.id}`
+            
+            if (selectedUrl) {
+                url.value = selectedUrl
+                searchResults.value = [] // Clear results
+                
+                // Fetch info for the selected video
+                // Use setTimeout to allow UI update first
+                setTimeout(() => {
+                    fetchInfoImmediate()
+                }, 100)
+            } else {
+                triggerError("有効なURLが見つかりませんでした")
+            }
+        }
+
         // Video info with AbortController for cancellable requests
         const fetchInfoImmediate = async () => {
             if (!url.value) return
+            
+            // Check if URL or Search Query
+            if (!isValidUrl(url.value)) {
+                // It's a search query -> Search instead of fetch info
+                await searchVideos(url.value)
+                return
+            }
+
+            // If it IS a URL, ensure search results are cleared
+            searchResults.value = []
             
             // Cancel previous request
             if (abortController) {
@@ -774,9 +852,9 @@ createApp({
         return {
             url, info, loading, downloading, error, selectedQuality,
             currentPage, showDeleteModal, showSettingsModal, showCancelModal, history, isDarkMode, downloadProgress,
-            availableQualities, currentTaskId, hasInfo,
+            availableQualities, currentTaskId, hasInfo, searchResults,
             fetchInfo: fetchInfoImmediate, formatDuration, download, cancelDownload, confirmCancelDownload, closeProgressBar, navigateToPage,
-            pasteFromClipboard, confirmClearHistory, clearHistory, deleteHistoryItem, loadFromHistory, 
+            pasteFromClipboard, confirmClearHistory, clearHistory, deleteHistoryItem, loadFromHistory, selectSearchResult,
             toggleTheme, toggleThemeManual, addRipple, formatTimestamp, formatRelativeTime,
             // API Base URL management
             apiBaseUrl, defaultApiBase, saveApiBase, resetApiBase,
