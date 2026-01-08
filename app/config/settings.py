@@ -2,11 +2,25 @@ import os
 import json
 import logging
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 class RedisConfig(BaseModel):
     url: str = Field(default="redis://redis:6379", description="Redis connection URL")
     socket_timeout: int = Field(default=5, description="Redis socket timeout in seconds")
+
+class DatabaseConfig(BaseModel):
+    url: str = Field(default="postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api", description="Database connection URL")
+
+class AuthConfig(BaseModel):
+    jwt_secret: str = Field(default="change-me-secret-key", description="JWT Secret Key")
+    algorithm: str = Field(default="HS256", description="JWT Algorithm")
+    access_token_expire_minutes: int = Field(default=1440, description="Token expiration in minutes")
+    
+    # SSO Settings
+    sso_enabled: bool = Field(default=False, description="Enable Google SSO")
+    google_client_id: str = Field(default="", description="Google Client ID")
+    google_client_secret: str = Field(default="", description="Google Client Secret")
+    admin_password: str = Field(default="admin", description="Fallback admin password (disabled if SSO enabled)")
 
 class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable rate limiting")
@@ -50,6 +64,8 @@ class ApiConfig(BaseModel):
 
 class Config(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
@@ -67,35 +83,51 @@ class Config(BaseModel):
 
     @classmethod
     def load_from_file(cls, path: str) -> "Config":
+        # Load from env vars for DB/Auth first (Priority 1)
+        env_config = {
+            "database": {
+                "url": os.getenv("DATABASE_URL", "postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api")
+            },
+            "auth": {
+                "sso_enabled": os.getenv("SSO_ENABLED", "false").lower() == "true",
+                "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+                "google_client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+                "admin_password": os.getenv("ADMIN_PASSWORD", "admin")
+            },
+            "redis": {
+                "url": os.getenv("REDIS_URL", "redis://redis:6379")
+            }
+        }
+        
         if not os.path.exists(path):
             cfg = cls()
+            # Apply env overrides
+            cfg_dict = cfg.model_dump()
+            
+            def deep_update(target, source):
+                for k, v in source.items():
+                    if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                        deep_update(target[k], v)
+                    else:
+                        target[k] = v
+                return target
+                
+            deep_update(cfg_dict, env_config)
+            
             logging.info(f"Config file not found at {path}, creating default.")
-            cfg.save_to_file(path)
-            return cfg
+            new_cfg = cls.model_validate(cfg_dict)
+            new_cfg.save_to_file(path)
+            return new_cfg
             
         try:
             with open(path, 'r') as f:
                 content = f.read()
                 if not content.strip():
-                     logging.warning(f"Config file at {path} is empty, using defaults.")
                      return cls()
                 data = json.loads(content)
-                # Helper to recursive merge could be added, but for now strict validate
-                # or partial update. Pydantic's model_validate handles dicts.
-                # However, we want to allow partial updates if possible, but 
-                # model_validate usually expects structure. 
-                # Simplest is to load matching fields.
-                
-                # To support partial config files, we might need a deep merge.
-                # For now, let's assume the file should match the structure or we use defaults for missing parts?
-                # Pydantic doesn't do deep merge automatically with model_validate(dict).
-                # But creating a default instance and updating it is safer.
-                
                 default_instance = cls()
-                # Simple deep merge for the top-level sections
                 default_dict = default_instance.model_dump()
                 
-                # Deep merge function
                 def deep_update(target, source):
                     for k, v in source.items():
                         if isinstance(v, dict) and k in target and isinstance(target[k], dict):
@@ -105,12 +137,14 @@ class Config(BaseModel):
                     return target
 
                 deep_update(default_dict, data)
+                # Apply env overrides LAST to ensure secrets from ENV are used
+                deep_update(default_dict, env_config)
+                
                 return cls.model_validate(default_dict)
                 
         except (json.JSONDecodeError, OSError) as e:
             logging.error(f"Error loading config from {path}: {e}. Using defaults.")
             return cls()
 
-# Load config
 CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/config.json")
 config = Config.load_from_file(CONFIG_PATH)
