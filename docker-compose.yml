@@ -4,7 +4,7 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "${PORT:-8001}:8000"  # Changed default host port to 8001 to avoid conflict
     environment:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api
@@ -18,7 +18,7 @@ services:
   redis:
     image: redis:alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6380}:6379"
 
   postgres:
     image: postgres:16-alpine
@@ -29,7 +29,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ytdlp_user -d ytdlp_api"]
       interval: 10s
