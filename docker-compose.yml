@@ -1,62 +1,40 @@
-version: '3.9'
+version: '3.8'
 
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ytdlp-api
-    restart: unless-stopped
-    environment:
-      - CONFIG_PATH=/config/config.json
+  app:
+    build: .
     ports:
       - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api
     depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - backend
+      - redis
+      - postgres
     volumes:
-      - ./config:/config
-      - ./web:/app/web:ro
-      - deno_cache:/home/appuser/.cache/deno
-    # GPU support: Uncomment the following section ONLY if you have NVIDIA Container Toolkit installed
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu, utility, video]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      - ./app:/app/app
+      - ./downloads:/app/downloads
 
   redis:
-    image: redis:7-alpine
-    container_name: ytdlp-redis
-    restart: unless-stopped
-    command: 
-      - redis-server
-      - --appendonly yes
-      - --maxmemory 256mb
-      - --maxmemory-policy allkeys-lru
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ytdlp_api
+      POSTGRES_USER: ytdlp_user
+      POSTGRES_PASSWORD: ytdlp_password
     volumes:
-      - redis_data:/data
-    networks:
-      - backend
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U ytdlp_user -d ytdlp_api"]
       interval: 10s
-      timeout: 3s
-      retries: 3
+      timeout: 5s
+      retries: 5
 
 volumes:
-  redis_data:
-  deno_cache:
-
-networks:
-  backend:
+  postgres_data:

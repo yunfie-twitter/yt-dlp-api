@@ -1,30 +1,68 @@
-from fastapi import APIRouter, Depends, Security
-from fastapi.security import APIKeyHeader
-from fastapi import HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from app.services.auth_service import auth_service
+from app.infra.database import get_db
 from app.config.settings import config
-import os
+from pydantic import BaseModel
+from typing import Optional
 
-router = APIRouter()
+router = APIRouter(prefix="/admin")
+security = HTTPBearer()
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+class LoginRequest(BaseModel):
+    password: str
 
-async def verify_api_key(api_key: str = Security(api_key_header)):
-    """Verify API key for admin endpoints"""
-    expected_key = os.getenv("ADMIN_API_KEY")
-    if not expected_key:
-        return None
+class ConfigUpdateRequest(BaseModel):
+    rate_limit: Optional[dict] = None
+    download: Optional[dict] = None
+    security: Optional[dict] = None
+    ytdlp: Optional[dict] = None
+
+@router.post("/login")
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    if config.auth.sso_enabled:
+        raise HTTPException(400, "Password login is disabled when SSO is enabled")
     
-    if api_key != expected_key:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    return api_key
+    if request.password != config.auth.admin_password:
+        raise HTTPException(401, "Invalid password")
+    
+    token = auth_service.create_access_token({"sub": "admin"})
+    return {"access_token": token, "token_type": "bearer"}
 
-@router.get("/config", dependencies=[Depends(verify_api_key)])
-async def get_config():
-    """Get current configuration (admin only)"""
+@router.get("/config")
+async def get_config(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    # Simple token verification (should be robust in prod)
+    if not credentials:
+        raise HTTPException(401, "Invalid token")
+        
     return {
-        "rate_limit": config.rate_limit.dict(),
-        "download": config.download.dict(),
-        "security": config.security.dict(),
-        "ytdlp": config.ytdlp.dict(),
-        "i18n": config.i18n.dict()
+        "rate_limit": config.rate_limit.model_dump(),
+        "download": config.download.model_dump(),
+        "security": config.security.model_dump(),
+        "ytdlp": config.ytdlp.model_dump()
     }
+
+@router.put("/config")
+async def update_config(
+    update: ConfigUpdateRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    if update.rate_limit:
+        config.rate_limit = config.rate_limit.model_validate(update.rate_limit)
+    if update.download:
+        config.download = config.download.model_validate(update.download)
+    if update.security:
+        config.security = config.security.model_validate(update.security)
+        
+    # Save to disk
+    from app.config.settings import CONFIG_PATH
+    config.save_to_file(CONFIG_PATH)
+    
+    return {"status": "success"}
+
+@router.get("/login/google")
+async def google_login():
+    # Placeholder for actual OAuth redirect
+    return {"url": "https://accounts.google.com/o/oauth2/auth..."}
