@@ -8,12 +8,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api
+      - CONFIG_PATH=/app/config/config.json # Explicitly set config path
     depends_on:
       - redis
       - postgres
     volumes:
       - ./app:/app/app
       - ./downloads:/app/downloads
+      - ./config.json:/app/config/config.json # Mount config.json from host
 
   redis:
     image: redis:alpine
