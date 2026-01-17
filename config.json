@@ -1,0 +1,63 @@
+{
+  "redis": {
+    "url": "redis://redis:6379",
+    "socket_timeout": 5
+  },
+  "database": {
+    "url": "postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api"
+  },
+  "auth": {
+    "jwt_secret": "change-me-secret-key",
+    "algorithm": "HS256",
+    "access_token_expire_minutes": 1440,
+    "sso_enabled": false,
+    "google_client_id": "",
+    "google_client_secret": "",
+    "admin_password": "admin"
+  },
+  "rate_limit": {
+    "enabled": true,
+    "max_requests": 5,
+    "window_seconds": 60
+  },
+  "download": {
+    "max_concurrent": 10,
+    "timeout_seconds": 3600,
+    "socket_timeout": 10,
+    "retries": 3
+  },
+  "security": {
+    "enable_ssrf_protection": true,
+    "allow_private_ips": false,
+    "allow_localhost": false
+  },
+  "ytdlp": {
+    "js_runtime": null,
+    "auto_detect_runtime": true,
+    "default_format": "best",
+    "default_audio_format": "opus",
+    "enable_live_streams": false,
+    "enable_gpu": false
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(message)s",
+    "enable_rich": true
+  },
+  "i18n": {
+    "default_locale": "en",
+    "supported_locales": [
+      "en",
+      "ja"
+    ]
+  },
+  "api": {
+    "title": "yt-dlp Streaming API",
+    "description": "Production-ready yt-dlp streaming API",
+    "version": "4.0.0",
+    "cors_origins": [
+      "*"
+    ],
+    "debug": true
+  }
+}
