@@ -38,12 +38,6 @@ os.makedirs("app/static/admin", exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# 5. Mount web clients directory
-web_clients_path = Path("web/clients")
-if web_clients_path.exists():
-    app.mount("/web/clients", StaticFiles(directory="web/clients", html=True), name="web_clients")
-    print(f"Mounted /web/clients from {web_clients_path.absolute()}")
-
 # /web 以下で app/static を公開
 app.mount(
     "/web",
