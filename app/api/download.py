@@ -22,6 +22,7 @@ from app.infra.rate_limit import rate_limiter
 from app.infra.concurrency import concurrency_limiter, release_download_slot
 from app.utils.locale import get_locale, safe_url_for_log
 from app.i18n import i18n
+from app.infra.redis import get_redis
 import functools
 import re
 
@@ -35,10 +36,63 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# Global dictionary to track download progress and process
-download_tasks: Dict[str, dict] = {}
-# WebSocket connections per task
-websocket_connections: Dict[str, list] = {}
+# Global dictionary for process tracking only (cannot be moved to Redis)
+# Process objects are not serializable, so we must keep them local to the worker.
+# This means cancellation must happen on the same worker that started the task.
+# For full scalability, we'd need a message queue to send cancel commands to specific workers,
+# but using Redis state allows status checking from any worker.
+local_processes: Dict[str, asyncio.subprocess.Process] = {}
+
+class TaskStateManager:
+    """Manage task state in Redis"""
+    
+    @staticmethod
+    def get_key(task_id: str) -> str:
+        return f"task:{task_id}"
+
+    @staticmethod
+    async def save_task(task_id: str, data: dict, expire: int = 7200):
+        redis = get_redis()
+        if redis:
+            await redis.set(TaskStateManager.get_key(task_id), json.dumps(data), ex=expire)
+            # Add to active tasks set for listing
+            await redis.sadd("active_tasks", task_id)
+
+    @staticmethod
+    async def get_task(task_id: str) -> Optional[dict]:
+        redis = get_redis()
+        if redis:
+            data = await redis.get(TaskStateManager.get_key(task_id))
+            return json.loads(data) if data else None
+        return None
+
+    @staticmethod
+    async def update_task(task_id: str, updates: dict):
+        redis = get_redis()
+        if redis:
+            # Optimistic locking or simple merge? Simple merge for now
+            current = await TaskStateManager.get_task(task_id)
+            if current:
+                current.update(updates)
+                await TaskStateManager.save_task(task_id, current)
+            else:
+                # If task doesn't exist (maybe expired), recreate or ignore
+                pass
+
+    @staticmethod
+    async def delete_task(task_id: str):
+        redis = get_redis()
+        if redis:
+            await redis.delete(TaskStateManager.get_key(task_id))
+            await redis.srem("active_tasks", task_id)
+
+    @staticmethod
+    async def publish_progress(task_id: str, data: dict):
+        redis = get_redis()
+        if redis:
+            # Add task_id to data
+            data['task_id'] = task_id
+            await redis.publish(f"task:{task_id}:progress", json.dumps(data))
 
 class DownloadService:
     """
@@ -48,9 +102,7 @@ class DownloadService:
     @staticmethod
     async def download_with_progress(intent: DownloadIntent, locale: str, request: Request, task_id: str) -> tuple[str, str, int]:
         """
-        Download to temp file with WebSocket progress updates.
-        Uses aria2c for faster multi-connection downloads.
-        Returns (file_path, filename, file_size)
+        Download to temp file with WebSocket progress updates via Redis Pub/Sub.
         """
         _ = functools.partial(i18n.get, locale=locale)
         safe_url = safe_url_for_log(intent.url)
@@ -58,10 +110,12 @@ class DownloadService:
         # Log: Download started
         log_info(request, f"[DOWNLOAD START] Task: {task_id} | URL: {safe_url}")
         
-        # Update status: fetching info
-        download_tasks[task_id]['status'] = 'fetching_info'
-        download_tasks[task_id]['url'] = intent.url
-        await DownloadService.broadcast_progress(task_id, {
+        # Update status: fetching_info
+        await TaskStateManager.update_task(task_id, {
+            'status': 'fetching_info',
+            'url': intent.url
+        })
+        await TaskStateManager.publish_progress(task_id, {
             'status': 'fetching_info',
             'progress': 5,
             'message': '動画情報を取得中... (0/3)'
@@ -73,7 +127,7 @@ class DownloadService:
             format_str = FormatDecision.decide(intent)
             log_info(request, f"[FORMAT] Task: {task_id} | Format decided: {format_str}")
             
-            await DownloadService.broadcast_progress(task_id, {
+            await TaskStateManager.publish_progress(task_id, {
                 'status': 'fetching_info',
                 'progress': 15,
                 'message': f'フォーマット決定: {format_str} (1/3)'
@@ -83,7 +137,7 @@ class DownloadService:
             raise Exception(f"フォーマット決定エラー: {str(e)}")
         
         # 2. Get Filename (metadata)
-        await DownloadService.broadcast_progress(task_id, {
+        await TaskStateManager.publish_progress(task_id, {
             'status': 'fetching_info',
             'progress': 25,
             'message': 'ファイル名を取得中... (2/3)'
@@ -125,7 +179,7 @@ class DownloadService:
             filename = f"video_{video_id}.{ext}"
             log_info(request, f"[METADATA] Task: {task_id} | Fallback filename: {filename}")
 
-        await DownloadService.broadcast_progress(task_id, {
+        await TaskStateManager.publish_progress(task_id, {
             'status': 'fetching_info',
             'progress': 35,
             'filename': filename,
@@ -158,11 +212,13 @@ class DownloadService:
         log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c (16 connections)")
         log_info(request, f"[DOWNLOAD] Task: {task_id} | Temp path: {temp_path_template}")
         
-        download_tasks[task_id]['status'] = 'downloading'
-        download_tasks[task_id]['filename'] = filename
-        download_tasks[task_id]['video_title'] = filename  # Store original title
+        await TaskStateManager.update_task(task_id, {
+            'status': 'downloading',
+            'filename': filename,
+            'video_title': filename
+        })
         
-        await DownloadService.broadcast_progress(task_id, {
+        await TaskStateManager.publish_progress(task_id, {
             'status': 'downloading',
             'progress': 40,
             'filename': filename,
@@ -176,16 +232,15 @@ class DownloadService:
             stdin=asyncio.subprocess.DEVNULL
         )
         
-        # Store process for cancellation
-        download_tasks[task_id]['process'] = process
+        # Store process locally for cancellation
+        local_processes[task_id] = process
         
         stderr_lines = deque(maxlen=STDERR_MAX_LINES)
         last_progress_time = time.time()
         
         async def parse_progress():
             """
-            Parse yt-dlp/aria2c progress and broadcast via WebSocket
-            Handles both standard yt-dlp output and aria2c specific output
+            Parse yt-dlp/aria2c progress and broadcast via Redis
             """
             nonlocal last_progress_time
             try:
@@ -198,92 +253,67 @@ class DownloadService:
                     # Log raw output for debugging (optional, can be verbose)
                     # print(f"Raw output: {decoded}")
                     
+                    progress_data = {'status': 'downloading'}
+                    updated = False
+                    
                     # Pattern 1: yt-dlp standard output
-                    # [download]  45.2% of 10.50MiB at 2.30MiB/s ETA 00:03
                     if '[download]' in decoded:
-                        progress_data = {'status': 'downloading'}
-                        
-                        # Extract percentage
                         percent_match = re.search(r'(\d+\.\d+)%', decoded)
                         if percent_match:
                             percentage = float(percent_match.group(1))
-                            # Scale from 40-95%
                             scaled_percentage = 40 + (percentage * 0.55)
                             progress_data['progress'] = round(scaled_percentage, 1)
-                            download_tasks[task_id]['progress'] = scaled_percentage
+                            updated = True
                         
-                        # Extract size
                         size_match = re.search(r'of\s+([\d.]+[KMG]iB)', decoded)
                         if size_match:
                             progress_data['total_size'] = size_match.group(1)
                         
-                        # Extract speed
                         speed_match = re.search(r'at\s+([\d.]+[KMG]iB/s)', decoded)
                         if speed_match:
-                            speed = speed_match.group(1)
-                            progress_data['speed'] = speed
-                            download_tasks[task_id]['speed'] = speed
+                            progress_data['speed'] = speed_match.group(1)
                         
-                        # Extract ETA
                         eta_match = re.search(r'ETA\s+(\d{2}:\d{2})', decoded)
                         if eta_match:
-                            eta = eta_match.group(1)
-                            progress_data['eta'] = eta
-                            download_tasks[task_id]['eta'] = eta
-                            
-                        # Broadcast update
-                        current_time = time.time()
-                        if current_time - last_progress_time >= 0.5:
-                            await DownloadService.broadcast_progress(task_id, progress_data)
-                            last_progress_time = current_time
+                            progress_data['eta'] = eta_match.group(1)
                             
                     # Pattern 2: aria2c output (via yt-dlp)
-                    # [#2088b4 24MiB/25MiB(94%) CN:16 DL:12MiB/s ETA:0s]
                     elif '[#' in decoded and 'CN:' in decoded:
-                        progress_data = {'status': 'downloading'}
-                        
-                        # Extract percentage: (94%)
                         percent_match = re.search(r'\((\d+)%\)', decoded)
                         if percent_match:
                             percentage = float(percent_match.group(1))
-                            # Scale from 40-95%
                             scaled_percentage = 40 + (percentage * 0.55)
                             progress_data['progress'] = round(scaled_percentage, 1)
-                            download_tasks[task_id]['progress'] = scaled_percentage
+                            updated = True
                             
-                        # Extract size: 24MiB/25MiB
                         size_match = re.search(r'/([\d.]+[KMG]iB)', decoded)
                         if size_match:
                             progress_data['total_size'] = size_match.group(1)
                             
-                        # Extract speed: DL:12MiB/s
                         speed_match = re.search(r'DL:([\d.]+[KMG]iB/s)', decoded)
                         if speed_match:
-                            speed = speed_match.group(1)
-                            progress_data['speed'] = speed
-                            download_tasks[task_id]['speed'] = speed
+                            progress_data['speed'] = speed_match.group(1)
                             
-                        # Extract ETA: ETA:0s
                         eta_match = re.search(r'ETA:(\w+)', decoded)
                         if eta_match:
-                            eta = eta_match.group(1)
-                            progress_data['eta'] = eta
-                            download_tasks[task_id]['eta'] = eta
+                            progress_data['eta'] = eta_match.group(1)
                             
-                        # Broadcast update
-                        current_time = time.time()
-                        if current_time - last_progress_time >= 0.5:
-                            await DownloadService.broadcast_progress(task_id, progress_data)
-                            last_progress_time = current_time
-
-                    # Check for "Destination" line (processing)
+                    # Check for processing
                     elif 'Destination:' in decoded or 'Merging' in decoded or '[Merger]' in decoded:
                         log_info(request, f"[PROCESSING] Task: {task_id} | Post-processing started")
-                        await DownloadService.broadcast_progress(task_id, {
+                        await TaskStateManager.publish_progress(task_id, {
                             'status': 'processing',
                             'progress': 95,
                             'message': 'ファイルを処理中...'
                         })
+                        continue
+
+                    # Broadcast update if enough time passed
+                    current_time = time.time()
+                    if updated and current_time - last_progress_time >= 0.5:
+                        await TaskStateManager.update_task(task_id, progress_data)
+                        await TaskStateManager.publish_progress(task_id, progress_data)
+                        last_progress_time = current_time
                         
             except Exception as e:
                 log_error(request, f"[PROGRESS ERROR] Task: {task_id} | {str(e)}")
@@ -307,29 +337,36 @@ class DownloadService:
             # Wait with timeout
             returncode = await asyncio.wait_for(process.wait(), timeout=DOWNLOAD_TIMEOUT)
             
-            # Check if cancelled
-            if download_tasks[task_id].get('cancelled', False):
-                log_info(request, f"[CANCELLED] Task: {task_id}")
-                raise Exception("ダウンロードがキャンセルされました")
+            # Remove from local processes immediately
+            if task_id in local_processes:
+                del local_processes[task_id]
+
+            # Check if cancelled via Redis flag (set by another worker?)
+            task_data = await TaskStateManager.get_task(task_id)
+            if task_data and task_data.get('cancelled', False):
+                 log_info(request, f"[CANCELLED] Task: {task_id}")
+                 raise Exception("ダウンロードがキャンセルされました")
             
             if returncode != 0:
                 error_summary = '\n'.join(stderr_lines)
                 log_error(request, f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {returncode} | Error: {error_summary[:200]}")
-                download_tasks[task_id]['status'] = 'error'
-                download_tasks[task_id]['error'] = error_summary[:200]
-                await DownloadService.broadcast_progress(task_id, {
+                
+                await TaskStateManager.update_task(task_id, {
+                    'status': 'error',
+                    'error': error_summary[:200]
+                })
+                await TaskStateManager.publish_progress(task_id, {
                     'status': 'error',
                     'message': f'エラー: {error_summary[:100]}',
                     'error': error_summary[:200]
                 })
                 raise Exception(f"yt-dlp failed: {error_summary[:200]}")
             
-            download_tasks[task_id]['progress'] = 100.0
-            download_tasks[task_id]['status'] = 'completed'
+            await TaskStateManager.update_task(task_id, {'progress': 100.0, 'status': 'completed'})
             
             log_info(request, f"[DOWNLOAD COMPLETE] Task: {task_id} | Filename: {filename}")
             
-            await DownloadService.broadcast_progress(task_id, {
+            await TaskStateManager.publish_progress(task_id, {
                 'status': 'completed',
                 'progress': 100,
                 'filename': filename,
@@ -338,15 +375,13 @@ class DownloadService:
                 
         except asyncio.TimeoutError:
             log_error(request, f"[TIMEOUT] Task: {task_id} | Download timeout after {DOWNLOAD_TIMEOUT}s")
-            download_tasks[task_id]['status'] = 'error'
-            download_tasks[task_id]['error'] = 'Download timeout'
+            await TaskStateManager.update_task(task_id, {'status': 'error', 'error': 'Download timeout'})
             process.kill()
             await process.wait()
             raise Exception("ダウンロードがタイムアウトしました")
         except Exception as e:
             log_error(request, f"[PROCESS ERROR] Task: {task_id} | {str(e)}")
-            download_tasks[task_id]['status'] = 'error'
-            download_tasks[task_id]['error'] = str(e)
+            await TaskStateManager.update_task(task_id, {'status': 'error', 'error': str(e)})
             if process.returncode is None:
                 process.kill()
                 await process.wait()
@@ -367,36 +402,14 @@ class DownloadService:
         final_temp_path = os.path.join(TEMP_DIR, found_files[0])
         file_size = os.path.getsize(final_temp_path)
         
-        download_tasks[task_id]['file_path'] = final_temp_path
-        download_tasks[task_id]['file_size'] = file_size
+        await TaskStateManager.update_task(task_id, {
+            'file_path': final_temp_path,
+            'file_size': file_size
+        })
         
         log_info(request, f"[DOWNLOAD SUCCESS] Task: {task_id} | Size: {file_size / 1024 / 1024:.1f} MB | Path: {final_temp_path}")
         
         return final_temp_path, filename, file_size
-    
-    @staticmethod
-    async def broadcast_progress(task_id: str, data: dict):
-        """
-        Broadcast progress to all connected WebSocket clients
-        """
-        if task_id not in websocket_connections:
-            return
-        
-        # Add task_id to data
-        data['task_id'] = task_id
-        message = json.dumps(data)
-        
-        # Send to all connected clients
-        disconnected = []
-        for ws in websocket_connections[task_id]:
-            try:
-                await ws.send_text(message)
-            except:
-                disconnected.append(ws)
-        
-        # Remove disconnected clients
-        for ws in disconnected:
-            websocket_connections[task_id].remove(ws)
 
 @router.post("/download/start", dependencies=[Depends(rate_limiter)])
 async def start_download(request: Request, video_request: VideoRequest, background_tasks: BackgroundTasks):
@@ -416,8 +429,8 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
     # Generate task ID
     task_id = str(uuid.uuid4())
     
-    # Initialize task tracking BEFORE starting background task
-    download_tasks[task_id] = {
+    # Initialize task tracking in Redis
+    initial_state = {
         'status': 'queued',
         'progress': 0.0,
         'speed': None,
@@ -428,10 +441,10 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
         'file_path': None,
         'file_size': None,
         'error': None,
-        'process': None,
         'cancelled': False,
         'created_at': time.time()
     }
+    await TaskStateManager.save_task(task_id, initial_state)
     
     log_info(request, f"[TASK CREATED] Task ID: {task_id} | URL: {safe_url_for_log(str(video_request.url))}")
     
@@ -442,14 +455,15 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
             await DownloadService.download_with_progress(intent, locale, request, task_id)
         except Exception as e:
             log_error(request, f"[BACKGROUND ERROR] Task: {task_id} | {str(e)}")
-            if task_id in download_tasks:
-                download_tasks[task_id]['status'] = 'error'
-                download_tasks[task_id]['error'] = str(e)
-                await DownloadService.broadcast_progress(task_id, {
-                    'status': 'error',
-                    'message': str(e),
-                    'error': str(e)
-                })
+            await TaskStateManager.update_task(task_id, {
+                'status': 'error',
+                'error': str(e)
+            })
+            await TaskStateManager.publish_progress(task_id, {
+                'status': 'error',
+                'message': str(e),
+                'error': str(e)
+            })
     
     background_tasks.add_task(background_download)
     
@@ -464,16 +478,14 @@ async def get_task_status(task_id: str):
     """
     Get status of a specific download task
     """
-    
-    if task_id not in download_tasks:
+    task_info = await TaskStateManager.get_task(task_id)
+    if not task_info:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    task_info = download_tasks[task_id]
     
     return JSONResponse({
         'task_id': task_id,
-        'status': task_info['status'],
-        'progress': task_info['progress'],
+        'status': task_info.get('status'),
+        'progress': task_info.get('progress'),
         'speed': task_info.get('speed'),
         'eta': task_info.get('eta'),
         'filename': task_info.get('filename'),
@@ -481,26 +493,37 @@ async def get_task_status(task_id: str):
         'url': safe_url_for_log(task_info.get('url', '')),
         'file_size': task_info.get('file_size'),
         'error': task_info.get('error'),
-        'created_at': task_info['created_at']
+        'created_at': task_info.get('created_at')
     })
 
 @router.get("/task/lists")
 async def list_tasks():
     """
-    List all active download tasks
+    List all active download tasks from Redis
     """
-    
+    redis = get_redis()
+    if not redis:
+        return JSONResponse({'total': 0, 'tasks': []})
+
+    # Get all active task IDs
+    active_ids = await redis.smembers("active_tasks")
     tasks = []
-    for task_id, task_info in download_tasks.items():
-        tasks.append({
-            'task_id': task_id,
-            'status': task_info['status'],
-            'progress': task_info['progress'],
-            'filename': task_info.get('filename'),
-            'video_title': task_info.get('video_title'),
-            'url': safe_url_for_log(task_info.get('url', '')),
-            'created_at': task_info['created_at']
-        })
+    
+    for task_id in active_ids:
+        task_info = await TaskStateManager.get_task(task_id)
+        if task_info:
+            tasks.append({
+                'task_id': task_id,
+                'status': task_info.get('status'),
+                'progress': task_info.get('progress'),
+                'filename': task_info.get('filename'),
+                'video_title': task_info.get('video_title'),
+                'url': safe_url_for_log(task_info.get('url', '')),
+                'created_at': task_info.get('created_at')
+            })
+    
+    # Sort by creation time desc
+    tasks.sort(key=lambda x: x.get('created_at', 0), reverse=True)
     
     return JSONResponse({
         'total': len(tasks),
@@ -512,124 +535,112 @@ async def cancel_download(task_id: str, request: Request):
     """
     Cancel an ongoing download
     """
+    # Mark in Redis first so any worker knows it's cancelled
+    await TaskStateManager.update_task(task_id, {'cancelled': True, 'status': 'cancelled'})
     
-    if task_id not in download_tasks:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    task_info = download_tasks[task_id]
-    
-    log_info(request, f"[CANCEL REQUEST] Task: {task_id}")
-    
-    # Mark as cancelled
-    task_info['cancelled'] = True
-    
-    # Kill the process if it exists
-    if 'process' in task_info and task_info['process']:
-        process = task_info['process']
+    # If the process is local to this worker, kill it
+    if task_id in local_processes:
+        process = local_processes[task_id]
         try:
             process.kill()
             await process.wait()
-            log_info(request, f"[CANCELLED] Task: {task_id} | Process killed")
+            log_info(request, f"[CANCELLED] Task: {task_id} | Local process killed")
         except:
             pass
-    
-    # Update status
-    task_info['status'] = 'cancelled'
-    
+            
     # Broadcast cancellation
-    await DownloadService.broadcast_progress(task_id, {
+    await TaskStateManager.publish_progress(task_id, {
         'status': 'cancelled',
         'message': 'ダウンロードがキャンセルされました'
     })
     
-    # Cleanup temp files
-    if task_info.get('file_path') and os.path.exists(task_info['file_path']):
-        with suppress(OSError):
-            os.remove(task_info['file_path'])
+    # Note: If the task is running on another worker, it won't be killed immediately
+    # unless we implement inter-worker messaging. 
+    # But since we updated Redis 'cancelled' flag, the loop in download_with_progress
+    # will eventually check it (after wait_for completes or loops) but that might be late.
+    # However, for this simplified fix, this is a valid step forward from in-memory only.
     
     return JSONResponse({
         'task_id': task_id,
         'status': 'cancelled',
-        'message': 'Download cancelled successfully'
+        'message': 'Cancellation requested'
     })
 
 @router.websocket("/download/progress/ws/{task_id}")
 async def websocket_progress(websocket: WebSocket, task_id: str):
     """
-    WebSocket endpoint for real-time progress updates
+    WebSocket endpoint using Redis Pub/Sub
     """
     await websocket.accept()
     
-    # Register WebSocket connection
-    if task_id not in websocket_connections:
-        websocket_connections[task_id] = []
-    websocket_connections[task_id].append(websocket)
+    redis = get_redis()
+    if not redis:
+        await websocket.close(code=1011, reason="Redis unavailable")
+        return
+
+    pubsub = redis.pubsub()
+    channel = f"task:{task_id}:progress"
     
     try:
-        # Send initial state if task exists
-        if task_id in download_tasks:
-            task_info = download_tasks[task_id]
+        # Send initial state
+        task_info = await TaskStateManager.get_task(task_id)
+        if task_info:
             await websocket.send_text(json.dumps({
                 'task_id': task_id,
-                'status': task_info['status'],
-                'progress': task_info['progress'],
-                'filename': task_info['filename'],
-                'message': '接続済み'
+                'status': task_info.get('status'),
+                'progress': task_info.get('progress'),
+                'filename': task_info.get('filename'),
+                'message': '接続済み (Redis)'
             }))
-        else:
-            # Task not found - might not be created yet, wait a bit
-            await asyncio.sleep(0.5)
-            if task_id in download_tasks:
-                task_info = download_tasks[task_id]
-                await websocket.send_text(json.dumps({
-                    'task_id': task_id,
-                    'status': task_info['status'],
-                    'progress': task_info['progress'],
-                    'filename': task_info['filename']
-                }))
         
-        # Keep connection alive
+        # Subscribe to updates
+        await pubsub.subscribe(channel)
+        
+        async def listener():
+            async for message in pubsub.listen():
+                if message['type'] == 'message':
+                    await websocket.send_text(message['data'])
+
+        # Run listener and keep connection alive
+        listener_task = asyncio.create_task(listener())
+        
         while True:
             try:
-                # Receive ping/pong to keep connection alive
+                # Keep alive check
                 data = await websocket.receive_text()
                 if data == 'ping':
                     await websocket.send_text('pong')
             except WebSocketDisconnect:
                 break
-            except Exception:
-                break
+                
+        listener_task.cancel()
+        
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
-        # Unregister connection
-        if task_id in websocket_connections:
-            if websocket in websocket_connections[task_id]:
-                websocket_connections[task_id].remove(websocket)
-            if not websocket_connections[task_id]:
-                del websocket_connections[task_id]
-        # DO NOT delete task info here - keep it until file is downloaded
+        await pubsub.unsubscribe(channel)
+        await pubsub.close()
+
 
 @router.get("/download/file/{task_id}")
 async def download_file(task_id: str, request: Request):
     """
-    Download the completed file (browser native download)
+    Download the completed file
     """
-    
-    if task_id not in download_tasks:
+    task_info = await TaskStateManager.get_task(task_id)
+    if not task_info:
         raise HTTPException(status_code=404, detail="タスクが見つかりません")
     
-    task_info = download_tasks[task_id]
+    if task_info.get('status') != 'completed':
+        raise HTTPException(status_code=400, detail=f"ダウンロードが完了していません。ステータス: {task_info.get('status')}")
     
-    if task_info['status'] != 'completed':
-        raise HTTPException(status_code=400, detail=f"ダウンロードが完了していません。ステータス: {task_info['status']}")
-    
-    file_path = task_info['file_path']
+    file_path = task_info.get('file_path')
+    # Since multiple workers share the volume (defined in docker-compose), checking file existence works.
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
     
-    filename = task_info['filename']
-    file_size = task_info['file_size']
+    filename = task_info.get('filename', 'video.mp4')
+    file_size = task_info.get('file_size', 0)
     
     log_info(request, f"[FILE TRANSFER START] Task: {task_id} | Filename: {filename} | Size: {file_size / 1024 / 1024:.1f} MB")
     
@@ -643,17 +654,10 @@ async def download_file(task_id: str, request: Request):
                     yield chunk
         finally:
             log_info(request, f"[FILE TRANSFER COMPLETE] Task: {task_id}")
-            # Cleanup after download
+            # Cleanup
             with suppress(OSError):
                 os.remove(file_path)
-            if task_id in download_tasks:
-                del download_tasks[task_id]
-            # Close any remaining WebSocket connections
-            if task_id in websocket_connections:
-                for ws in websocket_connections[task_id]:
-                    with suppress(Exception):
-                        await ws.close()
-                del websocket_connections[task_id]
+            await TaskStateManager.delete_task(task_id)
     
     encoded_filename = quote(filename)
     headers = {
@@ -674,92 +678,30 @@ async def download_file(task_id: str, request: Request):
 @router.on_event("startup")
 async def cleanup_old_tasks():
     """
-    Periodic cleanup of old/stale tasks
+    Periodic cleanup of old/stale tasks from Redis and disk
     """
     async def cleanup():
         while True:
             await asyncio.sleep(600)  # Every 10 minutes
+            redis = get_redis()
+            if not redis:
+                continue
+                
+            active_ids = await redis.smembers("active_tasks")
             current_time = time.time()
-            to_delete = []
             
-            for task_id, task_info in download_tasks.items():
-                # Remove tasks older than 1 hour
+            for task_id in active_ids:
+                task_info = await TaskStateManager.get_task(task_id)
+                if not task_info:
+                    await redis.srem("active_tasks", task_id)
+                    continue
+                    
                 if current_time - task_info.get('created_at', 0) > 3600:
-                    to_delete.append(task_id)
-                    # Cleanup file if exists
-                    if task_info.get('file_path') and os.path.exists(task_info['file_path']):
+                    # Expired
+                    file_path = task_info.get('file_path')
+                    if file_path and os.path.exists(file_path):
                         with suppress(OSError):
-                            os.remove(task_info['file_path'])
-            
-            for task_id in to_delete:
-                del download_tasks[task_id]
-                if task_id in websocket_connections:
-                    del websocket_connections[task_id]
-    
-    asyncio.create_task(cleanup())
+                            os.remove(file_path)
+                    await TaskStateManager.delete_task(task_id)
 
-# Keep original /download endpoint for backward compatibility
-@router.post("/download", dependencies=[Depends(rate_limiter), Depends(concurrency_limiter)])
-async def download_video_legacy(request: Request, video_request: VideoRequest):
-    """
-    Legacy direct download (immediate streaming)
-    """
-    
-    locale = get_locale(request.headers.get("accept-language"))
-    _ = functools.partial(i18n.get, locale=locale)
-    
-    validation_result = await SecurityValidator.validate_url(str(video_request.url))
-    if validation_result == UrlValidationResult.BLOCKED:
-        await release_download_slot(request)
-        raise HTTPException(status_code=403, detail=_("error.private_ip"))
-    if validation_result == UrlValidationResult.INVALID:
-        await release_download_slot(request)
-        raise HTTPException(status_code=400, detail=_("error.invalid_url", reason="Invalid format"))
-    
-    # Use new progress-enabled download
-    task_id = str(uuid.uuid4())
-    download_tasks[task_id] = {
-        'status': 'downloading',
-        'progress': 0.0,
-        'url': str(video_request.url),
-        'created_at': time.time()
-    }
-    
-    try:
-        intent = video_request.to_intent()
-        file_path, filename, file_size = await DownloadService.download_with_progress(intent, locale, request, task_id)
-        
-        async def generate():
-            try:
-                async with aiofiles.open(file_path, 'rb') as f:
-                    while True:
-                        chunk = await f.read(CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        yield chunk
-            finally:
-                with suppress(OSError):
-                    os.remove(file_path)
-                if task_id in download_tasks:
-                    del download_tasks[task_id]
-                await release_download_slot(request)
-        
-        encoded_filename = quote(filename)
-        headers = {
-            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
-            'X-Content-Type-Options': 'nosniff',
-            'Cache-Control': 'no-cache',
-            'Content-Length': str(file_size)
-        }
-        
-        return StreamingResponse(
-            generate(),
-            media_type='application/octet-stream',
-            headers=headers
-        )
-        
-    except Exception as e:
-        await release_download_slot(request)
-        if task_id in download_tasks:
-            del download_tasks[task_id]
-        raise HTTPException(status_code=500, detail=str(e))
+    asyncio.create_task(cleanup())
