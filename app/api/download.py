@@ -4,7 +4,7 @@ import time
 import uuid
 import aiofiles
 import json
-from typing import AsyncIterator, Optional, Dict
+from typing import AsyncIterator, Optional, Dict, List
 from collections import deque
 from contextlib import suppress
 from urllib.parse import quote
@@ -36,16 +36,22 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# Global dictionary for process tracking only (cannot be moved to Redis)
-# Process objects are not serializable, so we must keep them local to the worker.
-# This means cancellation must happen on the same worker that started the task.
-# For full scalability, we'd need a message queue to send cancel commands to specific workers,
-# but using Redis state allows status checking from any worker.
+# Global state for In-Memory mode
+memory_download_tasks: Dict[str, dict] = {}
+memory_websocket_connections: Dict[str, List[WebSocket]] = {}
+
+# Process tracking (always local)
 local_processes: Dict[str, asyncio.subprocess.Process] = {}
 
 class TaskStateManager:
-    """Manage task state in Redis"""
+    """
+    Abstracts task state management to support both Redis and In-Memory modes.
+    """
     
+    @staticmethod
+    def _use_redis() -> bool:
+        return get_redis() is not None
+
     @staticmethod
     def get_key(task_id: str) -> str:
         return f"task:{task_id}"
@@ -55,8 +61,10 @@ class TaskStateManager:
         redis = get_redis()
         if redis:
             await redis.set(TaskStateManager.get_key(task_id), json.dumps(data), ex=expire)
-            # Add to active tasks set for listing
             await redis.sadd("active_tasks", task_id)
+        else:
+            # In-Memory
+            memory_download_tasks[task_id] = data
 
     @staticmethod
     async def get_task(task_id: str) -> Optional[dict]:
@@ -64,20 +72,23 @@ class TaskStateManager:
         if redis:
             data = await redis.get(TaskStateManager.get_key(task_id))
             return json.loads(data) if data else None
-        return None
+        else:
+            # In-Memory
+            return memory_download_tasks.get(task_id)
 
     @staticmethod
     async def update_task(task_id: str, updates: dict):
         redis = get_redis()
         if redis:
-            # Optimistic locking or simple merge? Simple merge for now
+            # Simple merge for Redis
             current = await TaskStateManager.get_task(task_id)
             if current:
                 current.update(updates)
                 await TaskStateManager.save_task(task_id, current)
-            else:
-                # If task doesn't exist (maybe expired), recreate or ignore
-                pass
+        else:
+            # In-Memory
+            if task_id in memory_download_tasks:
+                memory_download_tasks[task_id].update(updates)
 
     @staticmethod
     async def delete_task(task_id: str):
@@ -85,14 +96,52 @@ class TaskStateManager:
         if redis:
             await redis.delete(TaskStateManager.get_key(task_id))
             await redis.srem("active_tasks", task_id)
+        else:
+            # In-Memory
+            if task_id in memory_download_tasks:
+                del memory_download_tasks[task_id]
+            if task_id in memory_websocket_connections:
+                del memory_websocket_connections[task_id]
 
     @staticmethod
     async def publish_progress(task_id: str, data: dict):
         redis = get_redis()
         if redis:
-            # Add task_id to data
+            # Redis Pub/Sub
             data['task_id'] = task_id
             await redis.publish(f"task:{task_id}:progress", json.dumps(data))
+        else:
+            # In-Memory Broadcast
+            if task_id in memory_websocket_connections:
+                data['task_id'] = task_id
+                message = json.dumps(data)
+                disconnected = []
+                for ws in memory_websocket_connections[task_id]:
+                    try:
+                        await ws.send_text(message)
+                    except:
+                        disconnected.append(ws)
+                
+                for ws in disconnected:
+                    memory_websocket_connections[task_id].remove(ws)
+
+    @staticmethod
+    async def get_active_tasks_list() -> List[dict]:
+        redis = get_redis()
+        tasks = []
+        if redis:
+            active_ids = await redis.smembers("active_tasks")
+            for task_id in active_ids:
+                task_info = await TaskStateManager.get_task(task_id)
+                if task_info:
+                    tasks.append(task_info)
+        else:
+            tasks = list(memory_download_tasks.values())
+        
+        # Add task_id to dict if missing (it should be there usually)
+        # and sort
+        tasks.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        return tasks
 
 class DownloadService:
     """
@@ -102,7 +151,7 @@ class DownloadService:
     @staticmethod
     async def download_with_progress(intent: DownloadIntent, locale: str, request: Request, task_id: str) -> tuple[str, str, int]:
         """
-        Download to temp file with WebSocket progress updates via Redis Pub/Sub.
+        Download to temp file with WebSocket progress updates via Redis Pub/Sub or In-Memory broadcast.
         """
         _ = functools.partial(i18n.get, locale=locale)
         safe_url = safe_url_for_log(intent.url)
@@ -240,7 +289,7 @@ class DownloadService:
         
         async def parse_progress():
             """
-            Parse yt-dlp/aria2c progress and broadcast via Redis
+            Parse yt-dlp/aria2c progress and broadcast
             """
             nonlocal last_progress_time
             try:
@@ -249,9 +298,6 @@ class DownloadService:
                     if not line:
                         break
                     decoded = line.decode().strip()
-                    
-                    # Log raw output for debugging (optional, can be verbose)
-                    # print(f"Raw output: {decoded}")
                     
                     progress_data = {'status': 'downloading'}
                     updated = False
@@ -341,7 +387,7 @@ class DownloadService:
             if task_id in local_processes:
                 del local_processes[task_id]
 
-            # Check if cancelled via Redis flag (set by another worker?)
+            # Check if cancelled via flag
             task_data = await TaskStateManager.get_task(task_id)
             if task_data and task_data.get('cancelled', False):
                  log_info(request, f"[CANCELLED] Task: {task_id}")
@@ -429,8 +475,9 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
     # Generate task ID
     task_id = str(uuid.uuid4())
     
-    # Initialize task tracking in Redis
+    # Initialize task tracking
     initial_state = {
+        'task_id': task_id,
         'status': 'queued',
         'progress': 0.0,
         'speed': None,
@@ -482,48 +529,14 @@ async def get_task_status(task_id: str):
     if not task_info:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    return JSONResponse({
-        'task_id': task_id,
-        'status': task_info.get('status'),
-        'progress': task_info.get('progress'),
-        'speed': task_info.get('speed'),
-        'eta': task_info.get('eta'),
-        'filename': task_info.get('filename'),
-        'video_title': task_info.get('video_title'),
-        'url': safe_url_for_log(task_info.get('url', '')),
-        'file_size': task_info.get('file_size'),
-        'error': task_info.get('error'),
-        'created_at': task_info.get('created_at')
-    })
+    return JSONResponse(task_info)
 
 @router.get("/task/lists")
 async def list_tasks():
     """
-    List all active download tasks from Redis
+    List all active download tasks
     """
-    redis = get_redis()
-    if not redis:
-        return JSONResponse({'total': 0, 'tasks': []})
-
-    # Get all active task IDs
-    active_ids = await redis.smembers("active_tasks")
-    tasks = []
-    
-    for task_id in active_ids:
-        task_info = await TaskStateManager.get_task(task_id)
-        if task_info:
-            tasks.append({
-                'task_id': task_id,
-                'status': task_info.get('status'),
-                'progress': task_info.get('progress'),
-                'filename': task_info.get('filename'),
-                'video_title': task_info.get('video_title'),
-                'url': safe_url_for_log(task_info.get('url', '')),
-                'created_at': task_info.get('created_at')
-            })
-    
-    # Sort by creation time desc
-    tasks.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+    tasks = await TaskStateManager.get_active_tasks_list()
     
     return JSONResponse({
         'total': len(tasks),
@@ -535,7 +548,7 @@ async def cancel_download(task_id: str, request: Request):
     """
     Cancel an ongoing download
     """
-    # Mark in Redis first so any worker knows it's cancelled
+    # Mark in state first
     await TaskStateManager.update_task(task_id, {'cancelled': True, 'status': 'cancelled'})
     
     # If the process is local to this worker, kill it
@@ -554,12 +567,6 @@ async def cancel_download(task_id: str, request: Request):
         'message': 'ダウンロードがキャンセルされました'
     })
     
-    # Note: If the task is running on another worker, it won't be killed immediately
-    # unless we implement inter-worker messaging. 
-    # But since we updated Redis 'cancelled' flag, the loop in download_with_progress
-    # will eventually check it (after wait_for completes or loops) but that might be late.
-    # However, for this simplified fix, this is a valid step forward from in-memory only.
-    
     return JSONResponse({
         'task_id': task_id,
         'status': 'cancelled',
@@ -569,57 +576,70 @@ async def cancel_download(task_id: str, request: Request):
 @router.websocket("/download/progress/ws/{task_id}")
 async def websocket_progress(websocket: WebSocket, task_id: str):
     """
-    WebSocket endpoint using Redis Pub/Sub
+    WebSocket endpoint handling both Redis Pub/Sub and In-Memory fallback
     """
     await websocket.accept()
     
     redis = get_redis()
-    if not redis:
-        await websocket.close(code=1011, reason="Redis unavailable")
-        return
-
-    pubsub = redis.pubsub()
-    channel = f"task:{task_id}:progress"
     
-    try:
-        # Send initial state
-        task_info = await TaskStateManager.get_task(task_id)
-        if task_info:
-            await websocket.send_text(json.dumps({
-                'task_id': task_id,
-                'status': task_info.get('status'),
-                'progress': task_info.get('progress'),
-                'filename': task_info.get('filename'),
-                'message': '接続済み (Redis)'
-            }))
-        
-        # Subscribe to updates
-        await pubsub.subscribe(channel)
-        
-        async def listener():
-            async for message in pubsub.listen():
-                if message['type'] == 'message':
-                    await websocket.send_text(message['data'])
+    # Send initial state
+    task_info = await TaskStateManager.get_task(task_id)
+    if task_info:
+        await websocket.send_text(json.dumps({
+            'task_id': task_id,
+            'status': task_info.get('status'),
+            'progress': task_info.get('progress'),
+            'filename': task_info.get('filename'),
+            'message': '接続済み'
+        }))
 
-        # Run listener and keep connection alive
-        listener_task = asyncio.create_task(listener())
+    if redis:
+        # Redis Pub/Sub Mode
+        pubsub = redis.pubsub()
+        channel = f"task:{task_id}:progress"
+        try:
+            await pubsub.subscribe(channel)
+            async def listener():
+                async for message in pubsub.listen():
+                    if message['type'] == 'message':
+                        await websocket.send_text(message['data'])
+
+            listener_task = asyncio.create_task(listener())
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                    if data == 'ping':
+                        await websocket.send_text('pong')
+                except WebSocketDisconnect:
+                    break
+            listener_task.cancel()
+        except Exception as e:
+            print(f"WebSocket error: {e}")
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+    else:
+        # In-Memory Mode
+        if task_id not in memory_websocket_connections:
+            memory_websocket_connections[task_id] = []
+        memory_websocket_connections[task_id].append(websocket)
         
-        while True:
-            try:
-                # Keep alive check
-                data = await websocket.receive_text()
-                if data == 'ping':
-                    await websocket.send_text('pong')
-            except WebSocketDisconnect:
-                break
-                
-        listener_task.cancel()
-        
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        await pubsub.unsubscribe(channel)
-        await pubsub.close()
+        try:
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                    if data == 'ping':
+                        await websocket.send_text('pong')
+                except WebSocketDisconnect:
+                    break
+        except Exception as e:
+            print(f"WebSocket error: {e}")
+        finally:
+            if task_id in memory_websocket_connections:
+                if websocket in memory_websocket_connections[task_id]:
+                    memory_websocket_connections[task_id].remove(websocket)
+                if not memory_websocket_connections[task_id]:
+                    del memory_websocket_connections[task_id]
 
 
 @router.get("/download/file/{task_id}")
@@ -635,7 +655,6 @@ async def download_file(task_id: str, request: Request):
         raise HTTPException(status_code=400, detail=f"ダウンロードが完了していません。ステータス: {task_info.get('status')}")
     
     file_path = task_info.get('file_path')
-    # Since multiple workers share the volume (defined in docker-compose), checking file existence works.
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
     
@@ -678,27 +697,20 @@ async def download_file(task_id: str, request: Request):
 @router.on_event("startup")
 async def cleanup_old_tasks():
     """
-    Periodic cleanup of old/stale tasks from Redis and disk
+    Periodic cleanup of old/stale tasks
     """
     async def cleanup():
         while True:
             await asyncio.sleep(600)  # Every 10 minutes
-            redis = get_redis()
-            if not redis:
-                continue
-                
-            active_ids = await redis.smembers("active_tasks")
             current_time = time.time()
             
-            for task_id in active_ids:
-                task_info = await TaskStateManager.get_task(task_id)
-                if not task_info:
-                    await redis.srem("active_tasks", task_id)
-                    continue
-                    
-                if current_time - task_info.get('created_at', 0) > 3600:
-                    # Expired
-                    file_path = task_info.get('file_path')
+            # Get all tasks via state manager
+            tasks = await TaskStateManager.get_active_tasks_list()
+            
+            for task in tasks:
+                task_id = task.get('task_id')
+                if current_time - task.get('created_at', 0) > 3600:
+                    file_path = task.get('file_path')
                     if file_path and os.path.exists(file_path):
                         with suppress(OSError):
                             os.remove(file_path)
