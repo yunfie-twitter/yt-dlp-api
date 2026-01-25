@@ -19,7 +19,6 @@ async def search_videos(
     limit: int = Query(5, ge=1, le=20, description="Maximum results")
 ):
     """Search videos using yt-dlp's ytsearch."""
-
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
 
@@ -31,4 +30,4 @@ async def search_videos(
         raise
     except Exception as e:
         log_error(request, f"Search error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
