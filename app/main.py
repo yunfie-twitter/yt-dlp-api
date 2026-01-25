@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import health, info, download, admin, search
+from app.api import health, info, download, search
 from app.config.settings import config, CONFIG_PATH
 from app.infra.redis import init_redis, close_redis
-from app.infra.database import init_db
 
 # 1. Create App
 app = FastAPI(
@@ -26,12 +25,10 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(info.router, tags=["Info"])
 app.include_router(download.router, tags=["Download"])
 app.include_router(search.router, tags=["Search"])
-app.include_router(admin.router, tags=["Admin"])
 
 @app.on_event("startup")
 async def startup_event():
     print(f"Loaded config from {CONFIG_PATH}")
-    init_db()
     await init_redis()
 
 @app.on_event("shutdown")
