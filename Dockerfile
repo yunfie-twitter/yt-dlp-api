@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# --user ではなく直接インストール(パスを固定するため)
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
@@ -17,7 +16,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 必要なランタイムパッケージ + aria2
+# 必要なランタイムパッケージ + aria2 + curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     aria2 \
@@ -31,22 +30,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV DENO_INSTALL=/usr/local
 RUN curl -fsSL https://deno.land/install.sh | sh
 
-# yt-dlpインストール
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp
-
-# Denoランタイム設定
-ENV YT_DLP_JS_RUNTIME=deno:/usr/local/bin/deno
-
 # 非rootユーザー作成
 RUN useradd -m -u 1000 appuser
 
-# Builderステージからライブラリをコピーし、権限をappuserに譲渡する
-# /usr/local にコピーすることで、パスを意識せずに利用可能にします
+# Builderステージからライブラリをコピー
 COPY --from=builder /install /usr/local
+
+# アプリ用ディレクトリ準備
+# /app/bin を作成して yt-dlp を配置、appuserが書き込めるようにする
+RUN mkdir -p /app/bin && chown appuser:appuser /app/bin
+
+# yt-dlp初期インストール
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /app/bin/yt-dlp && \
+    chmod a+rx /app/bin/yt-dlp && \
+    chown appuser:appuser /app/bin/yt-dlp
 
 # appディレクトリをコピー
 COPY ./app /app/app
+COPY ./entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # 設定ファイル用ディレクトリを作成して権限を付与
 RUN mkdir -p /config && chown -R appuser:appuser /config
@@ -60,6 +62,11 @@ RUN mkdir -p $DENO_DIR && chown -R appuser:appuser /home/appuser/.cache
 # aria2 設定用ディレクトリ
 RUN mkdir -p /home/appuser/.aria2 && chown -R appuser:appuser /home/appuser/.aria2
 
+# PATH設定
+ENV PATH="/app/bin:$PATH"
+# Denoランタイム設定 (PATHが変わったので調整不要だが環境変数は維持)
+ENV YT_DLP_JS_RUNTIME=deno:/usr/local/bin/deno
+
 USER appuser
 
 # ヘルスチェック
@@ -68,6 +75,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 EXPOSE 8000
 
-# app.main:app として正しいモジュールパスを指定
-# fix: Use single worker to ensure in-memory state (download_tasks) is shared
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
