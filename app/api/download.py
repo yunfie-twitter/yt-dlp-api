@@ -23,6 +23,7 @@ from app.infra.concurrency import concurrency_limiter, release_download_slot
 from app.utils.locale import get_locale, safe_url_for_log
 from app.i18n import i18n
 from app.infra.redis import get_redis
+from app.config.settings import config
 import functools
 import re
 
@@ -240,12 +241,14 @@ class DownloadService:
         temp_path_template = os.path.join(TEMP_DIR, f"{temp_id}.%(ext)s")
         
         # 4. Build Download Command with aria2c
+        use_aria2c = config.download.use_aria2c
+        
         cmd = YTDLPCommandBuilder.build_stream_command(
             intent.url,
             format_str,
             intent.audio_only,
             intent.file_format,
-            use_aria2c=True  # Enable aria2c for faster downloads
+            use_aria2c=use_aria2c
         )
         
         try:
@@ -258,7 +261,11 @@ class DownloadService:
         cmd = [c for c in cmd if c != '--no-progress']
         cmd.extend(['--newline', '--progress'])
         
-        log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c (16 connections)")
+        if use_aria2c:
+             log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c ({config.download.aria2c_max_connections} connections)")
+        else:
+             log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with standard downloader")
+        
         log_info(request, f"[DOWNLOAD] Task: {task_id} | Temp path: {temp_path_template}")
         
         await TaskStateManager.update_task(task_id, {
@@ -271,7 +278,7 @@ class DownloadService:
             'status': 'downloading',
             'progress': 40,
             'filename': filename,
-            'message': 'ダウンロード中... (aria2c: 16接続)'
+            'message': f'ダウンロード中... ({"aria2c" if use_aria2c else "standard"})'
         })
         
         process = await asyncio.create_subprocess_exec(
