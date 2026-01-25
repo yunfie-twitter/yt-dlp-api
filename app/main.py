@@ -1,8 +1,4 @@
-import os
-from pathlib import Path
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import health, info, download, admin, search
 from app.config.settings import config, CONFIG_PATH
@@ -31,24 +27,6 @@ app.include_router(info.router, tags=["Info"])
 app.include_router(download.router, tags=["Download"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(admin.router, tags=["Admin"])
-
-# 4. Static Files & Web Client
-os.makedirs("app/static", exist_ok=True)
-os.makedirs("app/static/admin", exist_ok=True)
-
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# /web 以下で app/static を公開
-app.mount(
-    "/web",
-    StaticFiles(directory="app/static", html=True),
-    name="web"
-)
-
-# Admin UI Shortcut
-@app.get("/admin/ui")
-async def admin_ui_redirect():
-    return RedirectResponse(url="/static/admin/index.html")
 
 @app.on_event("startup")
 async def startup_event():
