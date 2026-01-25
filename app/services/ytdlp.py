@@ -1,8 +1,9 @@
-from typing import List, Optional, NamedTuple
-from dataclasses import dataclass
 import asyncio
+from typing import List, NamedTuple, Optional
+
 from app.config.settings import config
 from app.core.state import state
+
 
 class CompletedProcess(NamedTuple):
     """Subprocess result"""
@@ -10,9 +11,10 @@ class CompletedProcess(NamedTuple):
     stdout: bytes
     stderr: bytes
 
+
 class SubprocessExecutor:
     """Execute subprocess with consistent error handling"""
-    
+
     @staticmethod
     async def run(
         cmd: List[str],
@@ -29,19 +31,19 @@ class SubprocessExecutor:
             stderr=asyncio.subprocess.PIPE if capture_stderr else asyncio.subprocess.DEVNULL,
             stdin=asyncio.subprocess.DEVNULL
         )
-        
+
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=timeout
             )
-            
+
             return CompletedProcess(
                 returncode=process.returncode,
                 stdout=stdout,
                 stderr=stderr if capture_stderr else b""
             )
-            
+
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
@@ -52,9 +54,10 @@ class SubprocessExecutor:
                 await process.wait()
             raise
 
+
 class YTDLPCommandBuilder:
     """Build yt-dlp commands with aria2c support"""
-    
+
     @staticmethod
     def _add_aria2c_args(cmd: List[str]) -> List[str]:
         """
@@ -62,10 +65,12 @@ class YTDLPCommandBuilder:
         """
         cmd.extend([
             '--external-downloader', 'aria2c',
-            '--external-downloader-args', 'aria2c:--max-connection-per-server=16 --split=16 --min-split-size=1M --file-allocation=none --console-log-level=warn'
+            '--external-downloader-args',
+            'aria2c:--max-connection-per-server=16 --split=16 '
+            '--min-split-size=1M --file-allocation=none --console-log-level=warn'
         ])
         return cmd
-    
+
     @staticmethod
     def build_info_command(url: str) -> List[str]:
         """Build command for fetching video info"""
@@ -76,17 +81,17 @@ class YTDLPCommandBuilder:
             '--socket-timeout', str(config.download.socket_timeout),
             '--retries', str(config.download.retries),
         ]
-        
+
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
-        
+
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
-        
+
         cmd.append(url)
-        
+
         return cmd
-    
+
     @staticmethod
     def build_filename_command(url: str, format_str: str) -> List[str]:
         """Build command for fetching filename"""
@@ -101,10 +106,10 @@ class YTDLPCommandBuilder:
             '--no-warnings',  # Suppress warnings that might interfere
             url
         ]
-        
+
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
-            
+
         return cmd
 
     @staticmethod
@@ -127,7 +132,7 @@ class YTDLPCommandBuilder:
             cmd.extend(['--js-runtimes', state.js_runtime])
 
         cmd.append(url)
-        
+
         return cmd
 
     @staticmethod
@@ -140,7 +145,7 @@ class YTDLPCommandBuilder:
     ) -> List[str]:
         """
         Build command for streaming download with aria2c support
-        
+
         Args:
             url: Video URL
             format_str: Format selector string
@@ -157,23 +162,23 @@ class YTDLPCommandBuilder:
             '--socket-timeout', str(config.download.socket_timeout),
             '--retries', str(config.download.retries),
         ]
-        
+
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
-        
+
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
-        
+
         # Add aria2c for faster downloads (except for stdout streaming)
         # Note: aria2c doesn't work well with stdout (-o -), so only use for file downloads
         # This is handled in download.py where we download to temp files
         if use_aria2c:
             cmd = YTDLPCommandBuilder._add_aria2c_args(cmd)
-        
+
         # Ensure progress is suppressed to keep stdout clean
         cmd.append('--no-progress')
-        cmd.append('--quiet') # Suppress other outputs
-        
+        cmd.append('--quiet')  # Suppress other outputs
+
         if audio_only:
             # Extract audio
             cmd.append('-x')
@@ -188,9 +193,9 @@ class YTDLPCommandBuilder:
                 cmd.extend(['--remux-video', file_format])
                 # If GPU enabled and converting video, add HW accel args
                 if config.ytdlp.enable_gpu:
-                     # Use NVENC for H264 conversion (common for mp4/mkv)
-                     # Note: This is a best-effort configuration for NVENC
-                     cmd.extend(['--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc -preset p4'])
+                    # Use NVENC for H264 conversion (common for mp4/mkv)
+                    # Note: This is a best-effort configuration for NVENC
+                    cmd.extend(['--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc -preset p4'])
             else:
                 # If no file format specified, try to merge into mp4
                 cmd.extend(['--merge-output-format', 'mp4'])
@@ -201,7 +206,7 @@ class YTDLPCommandBuilder:
     def build_search_command(query: str, limit: int = 5) -> List[str]:
         """
         Build command for searching videos
-        
+
         Args:
             query: Search query
             limit: Maximum number of results
@@ -214,11 +219,11 @@ class YTDLPCommandBuilder:
             '--socket-timeout', str(config.download.socket_timeout),
             '--retries', str(config.download.retries),
         ]
-        
+
         if not config.ytdlp.enable_live_streams:
             cmd.extend(['--match-filter', '!is_live'])
-            
+
         if state.js_runtime:
             cmd.extend(['--js-runtimes', state.js_runtime])
-            
+
         return cmd
