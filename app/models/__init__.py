@@ -1,5 +1,5 @@
-from .request import InfoRequest, VideoRequest
-from .response import VideoInfo, SearchResponse
 from .internal import DownloadIntent
+from .request import InfoRequest, VideoRequest
+from .response import SearchResponse, VideoInfo
 
-__all__ = ["InfoRequest", "VideoRequest", "VideoInfo", "SearchResponse", "DownloadIntent"]
+__all__ = ["DownloadIntent", "InfoRequest", "SearchResponse", "VideoInfo", "VideoRequest"]
