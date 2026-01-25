@@ -18,6 +18,8 @@ class DownloadConfig(BaseModel):
     timeout_seconds: int = Field(default=3600, ge=60, description="Download timeout in seconds")
     socket_timeout: int = Field(default=10, ge=1, description="Socket timeout for yt-dlp")
     retries: int = Field(default=3, ge=0, description="Number of retries for failed downloads")
+    use_aria2c: bool = Field(default=True, description="Use aria2c for faster downloads")
+    aria2c_max_connections: int = Field(default=16, ge=1, description="aria2c max connections per server")
 
 class SecurityConfig(BaseModel):
     enable_ssrf_protection: bool = Field(default=True, description="Enable SSRF protection")
