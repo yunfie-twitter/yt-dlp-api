@@ -4,39 +4,18 @@ services:
   app:
     build: .
     ports:
-      - "${PORT:-8001}:8000"  # Changed default host port to 8001 to avoid conflict
+      - "${PORT:-8001}:8000"
     environment:
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api
-      - CONFIG_PATH=/app/config/config.json # Explicitly set config path
+      - CONFIG_PATH=/app/config/config.json
     depends_on:
       - redis
-      - postgres
     volumes:
       - ./app:/app/app
       - ./downloads:/app/downloads
-      - ./config.json:/app/config/config.json # Mount config.json from host
+      - ./config.json:/app/config/config.json
 
   redis:
     image: redis:alpine
     ports:
       - "${REDIS_PORT:-6380}:6379"
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ytdlp_api
-      POSTGRES_USER: ytdlp_user
-      POSTGRES_PASSWORD: ytdlp_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${DB_PORT:-5433}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ytdlp_user -d ytdlp_api"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  postgres_data:
