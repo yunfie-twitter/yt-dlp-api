@@ -1,3 +1,3 @@
-from .settings import config, CONFIG_PATH
+from .settings import CONFIG_PATH, config
 
-__all__ = ["config", "CONFIG_PATH"]
+__all__ = ["CONFIG_PATH", "config"]
