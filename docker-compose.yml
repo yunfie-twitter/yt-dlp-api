@@ -12,8 +12,12 @@ services:
       - redis
     volumes:
       - ./app:/app/app
-      - ./downloads:/app/downloads
       - ./config.json:/app/config/config.json
+      # Use tmpfs for downloads to avoid disk I/O and auto-clean
+      - type: tmpfs
+        target: /tmp/ytdlp_downloads
+        tmpfs:
+          size: 2048M  # Limit to 2GB RAM usage
 
   redis:
     image: redis:alpine
