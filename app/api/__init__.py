@@ -1,3 +1,3 @@
-from . import health, info, download, search
+from . import download, health, info, search
 
-__all__ = ["health", "info", "download", "search"]
+__all__ = ["download", "health", "info", "search"]
