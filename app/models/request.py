@@ -1,8 +1,10 @@
-from pydantic import BaseModel, HttpUrl, Field, validator
 from typing import Optional
 from urllib.parse import urlparse
-from app.config.settings import config
+
+from pydantic import BaseModel, Field, HttpUrl, validator
+
 from app.models.internal import DownloadIntent
+
 
 class InfoRequest(BaseModel):
     url: HttpUrl = Field(..., description="Video URL")
@@ -15,6 +17,7 @@ class InfoRequest(BaseModel):
             raise ValueError("Invalid URL format")
         return v
 
+
 class VideoRequest(InfoRequest):
     format: Optional[str] = Field(None, description="Custom video format specification (yt-dlp syntax)")
     audio_only: Optional[bool] = Field(False, description="Download audio only (deprecated/implied by audio_format)")
@@ -22,7 +25,7 @@ class VideoRequest(InfoRequest):
     file_format: Optional[str] = Field(None, description="Output file extension/container (e.g. mp4, mp3)")
     # Remove ge/le constraints to allow 0, validation handled in validator
     quality: Optional[int] = Field(None, description="Video quality (0 for best/auto)")
-    
+
     @validator('quality')
     def validate_quality(cls, v):
         """Validate quality range, treating 0 as None (auto)"""
@@ -37,12 +40,12 @@ class VideoRequest(InfoRequest):
         # Logic: format takes precedence over audio_format.
         # If format is present, it's a video download.
         # If format is absent and audio_format is present, it's an audio download.
-        
+
         is_audio_only = False
         if not self.format and self.audio_format:
             is_audio_only = True
-        
-        # Respect explicit audio_only flag if format is not set? 
+
+        # Respect explicit audio_only flag if format is not set?
         # The user says "if both written, process video".
         # If self.audio_only is True but self.format is set, we treat as video per instruction.
         # If self.audio_only is True and self.format is NOT set, we treat as audio.
