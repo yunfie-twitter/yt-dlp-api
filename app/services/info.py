@@ -135,9 +135,9 @@ class VideoInfoService:
 
             return video_info
 
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail=_("error.parse_failed"))
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=_("error.parse_failed")) from e
         except HTTPException:
             raise
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail=_("error.timeout"))
+        except asyncio.TimeoutError as e:
+            raise HTTPException(status_code=504, detail=_("error.timeout")) from e
