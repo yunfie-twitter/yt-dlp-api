@@ -1,3 +1,3 @@
-from .auth import get_api_key, create_api_key, verify_issuance_permission
+from .auth import create_api_key, get_api_key, verify_issuance_permission
 
-__all__ = ["get_api_key", "create_api_key", "verify_issuance_permission"]
+__all__ = ["create_api_key", "get_api_key", "verify_issuance_permission"]
