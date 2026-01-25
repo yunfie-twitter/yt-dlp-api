@@ -128,5 +128,4 @@ X-API-Key: your_generated_api_key
 *   **Runtime**: Docker Container
 
 ## License
-
-Apache License 2.0
+GNU GENERAL PUBLIC LICENSE
