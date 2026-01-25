@@ -24,28 +24,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Mount Routers with Auth
-# Health check usually public
+# 3. Mount Routers
+# Public endpoints
 app.include_router(health.router, tags=["Health"])
 
-# Protected routes
+# Protected API v1 endpoints
 app.include_router(
     info.router, 
+    prefix="/api/v1", 
     tags=["Info"],
     dependencies=[Depends(get_api_key)]
 )
 app.include_router(
     download.router, 
+    prefix="/api/v1", 
     tags=["Download"],
     dependencies=[Depends(get_api_key)]
 )
 app.include_router(
     search.router, 
+    prefix="/api/v1", 
     tags=["Search"],
     dependencies=[Depends(get_api_key)]
 )
 
-# 4. Auth/Key Management Router
+# Auth Router
 class CreateKeyRequest(BaseModel):
     description: str = None
 
@@ -55,7 +58,7 @@ async def issue_api_key(request: Request, body: CreateKeyRequest):
     key_data = await create_api_key(origin, body.description)
     return key_data
 
-# 5. Metrics
+# Metrics
 Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
