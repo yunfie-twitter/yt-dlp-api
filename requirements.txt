@@ -10,3 +10,4 @@ rich>=13.0.0
 prometheus-fastapi-instrumentator>=6.0.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+ruff>=0.1.0
