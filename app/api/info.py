@@ -13,9 +13,11 @@ from app.utils.locale import get_locale, safe_url_for_log
 
 router = APIRouter()
 
+
 @router.post("/info", response_model=VideoInfo, dependencies=[Depends(rate_limiter)])
 async def get_video_info(request: Request, video_request: InfoRequest):
     """Get video information with caching"""
+
     locale = get_locale(request.headers.get("accept-language"))
     _ = functools.partial(i18n.get, locale=locale)
 
