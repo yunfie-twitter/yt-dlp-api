@@ -8,6 +8,10 @@ class RedisConfig(BaseModel):
     url: str = Field(default="redis://redis:6379", description="Redis connection URL")
     socket_timeout: int = Field(default=5, description="Redis socket timeout in seconds")
 
+class AuthConfig(BaseModel):
+    api_key_enabled: bool = Field(default=False, description="Enable API Key authentication")
+    issue_allowed_origins: List[str] = Field(default=["*"], description="Origins allowed to issue API keys")
+
 class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable rate limiting")
     max_requests: int = Field(default=5, ge=1, description="Max requests per window")
@@ -52,6 +56,7 @@ class ApiConfig(BaseModel):
 
 class Config(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
