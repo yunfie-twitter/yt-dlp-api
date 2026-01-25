@@ -1,8 +1,10 @@
-from fastapi import Request
 import logging
 from typing import Any
 
+from fastapi import Request
+
 logger = logging.getLogger(__name__)
+
 
 def log_with_context(
     request: Request,
@@ -20,14 +22,18 @@ def log_with_context(
     }
     logger.log(level, message, extra=extra)
 
+
 def log_info(request: Request, message: str, **kwargs: Any) -> None:
     log_with_context(request, logging.INFO, message, **kwargs)
+
 
 def log_error(request: Request, message: str, **kwargs: Any) -> None:
     log_with_context(request, logging.ERROR, message, **kwargs)
 
+
 def log_warning(request: Request, message: str, **kwargs: Any) -> None:
     log_with_context(request, logging.WARNING, message, **kwargs)
+
 
 def log_debug(request: Request, message: str, **kwargs: Any) -> None:
     log_with_context(request, logging.DEBUG, message, **kwargs)
