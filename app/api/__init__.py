@@ -1,1 +1,1 @@
-from . import health, info, download, admin, search
+from . import health, info, download, search
