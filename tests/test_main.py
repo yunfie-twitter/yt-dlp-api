@@ -24,9 +24,10 @@ async def test_auth_protected_endpoint_without_key():
     
     try:
         async with AsyncClient(app=app, base_url="http://test") as ac:
-            response = await ac.get("/info/v1/version") # Assuming this endpoint exists or similar
-            # Since we didn't mock Redis, it might 503 or 403 depending on implementation detail of get_api_key
-            # But definitely not 200 if auth is working
+            # Assuming /api/v1/info is a valid protected endpoint based on router structure
+            # We use a dummy payload for POST or just verify 403 on method not allowed or actual path
+            # Let's try to hit an endpoint that exists. /api/v1/search is GET.
+            response = await ac.get("/api/v1/search?q=test")
             assert response.status_code in [403, 503]
     finally:
         config.auth.api_key_enabled = original_setting
