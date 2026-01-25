@@ -1,9 +1,11 @@
 from fastapi import APIRouter
-from app.infra.redis import get_redis
+
 from app.core.state import state
 from app.i18n import i18n
+from app.infra.redis import get_redis  # noqa: F401
 
 router = APIRouter()
+
 
 @router.get("/")
 async def root():
@@ -17,6 +19,7 @@ async def root():
         "redis_enabled": state.redis is not None
     }
 
+
 @router.get("/health")
 async def health_check():
     """Lightweight health check"""
@@ -25,28 +28,29 @@ async def health_check():
         try:
             await state.redis.ping()
             redis_status = i18n.get("response.redis_connected")
-        except:
+        except Exception:
             redis_status = i18n.get("response.redis_disconnected")
-    
+
     return {
         "status": i18n.get("health.status"),
         "redis": redis_status
     }
+
 
 @router.get("/health/full")
 async def health_check_full():
     """Detailed health check"""
     redis_status = i18n.get("response.redis_disabled")
     active_downloads = 0
-    
+
     if state.redis:
         try:
             await state.redis.ping()
             redis_status = i18n.get("response.redis_connected")
             active_downloads = int(await state.redis.get("active_downloads_count") or 0)
-        except:
+        except Exception:
             redis_status = i18n.get("response.redis_disconnected")
-    
+
     return {
         "status": i18n.get("health.status"),
         "ytdlp_version": state.ytdlp_version,
