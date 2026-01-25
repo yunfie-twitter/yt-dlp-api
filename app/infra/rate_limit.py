@@ -1,7 +1,7 @@
 import functools
 import time
 from collections import deque
-from typing import Dict, Optional
+from typing import Dict
 
 from fastapi import HTTPException, Request
 
