@@ -146,7 +146,12 @@ class DownloadService:
     """
 
     @staticmethod
-    async def download_with_progress(intent: DownloadIntent, locale: str, request: Request, task_id: str) -> tuple[str, str, int]:
+    async def download_with_progress(
+        intent: DownloadIntent,
+        locale: str,
+        request: Request,
+        task_id: str
+    ) -> tuple[str, str, int]:
         """
         Download to temp file with WebSocket progress updates via Redis Pub/Sub or In-Memory broadcast.
         """
@@ -182,7 +187,7 @@ class DownloadService:
 
         except Exception as e:
             log_error(request, f"[FORMAT ERROR] Task: {task_id} | {str(e)}")
-            raise Exception(f"フォーマット決定エラー: {str(e)}")
+            raise Exception(f"フォーマット決定エラー: {str(e)}") from e
 
         # 2. Get Filename (metadata)
         await TaskStateManager.publish_progress(task_id, {
@@ -244,7 +249,11 @@ class DownloadService:
         cmd.extend(['--newline', '--progress'])
 
         if use_aria2c:
-            log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c ({config.download.aria2c_max_connections} connections)")
+            log_info(
+                request,
+                f"[DOWNLOAD] Task: {task_id} | Starting download with aria2c "
+                f"({config.download.aria2c_max_connections} connections)"
+            )
         else:
             log_info(request, f"[DOWNLOAD] Task: {task_id} | Starting download with standard downloader")
 
@@ -283,14 +292,14 @@ class DownloadService:
             nonlocal process
             # Limit update frequency to reduce Redis load
             last_progress_time = 0
-            
+
             while True:
                 line = await process.stdout.readline()
                 if not line:
                     break
-                
+
                 decoded = line.decode().strip()
-                
+
                 progress_data = {'status': 'downloading'}
                 updated = False
 
@@ -302,7 +311,7 @@ class DownloadService:
                         raw_percentage = float(percentage_match.group(1))
                         # Scale 0-100 to 20-95 range (0-20 is init, 95-100 is post-processing)
                         scaled_percentage = 20 + (raw_percentage * 0.75)
-                        
+
                         progress_data['progress'] = round(scaled_percentage, 1)
                         updated = True
 
@@ -325,7 +334,7 @@ class DownloadService:
                     if percentage_match:
                         raw_percentage = float(percentage_match.group(1))
                         scaled_percentage = 20 + (raw_percentage * 0.75)
-                        
+
                         progress_data['progress'] = round(scaled_percentage, 1)
                         updated = True
 
@@ -391,19 +400,22 @@ class DownloadService:
             # Check if cancelled via flag (double check)
             task_info = await TaskStateManager.get_task(task_id)
             if task_info and task_info.get('cancelled'):
-                 log_info(request, f"[CANCELLED] Task: {task_id}")
-                 raise Exception("ダウンロードがキャンセルされました")
+                log_info(request, f"[CANCELLED] Task: {task_id}")
+                raise Exception("ダウンロードがキャンセルされました")
 
             if returncode != 0:
                 error_summary = '\n'.join(stderr_lines)
-                log_error(request, f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {returncode} | Error: {error_summary[:200]}")
+                log_error(
+                    request,
+                    f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {returncode} | Error: {error_summary[:200]}"
+                )
 
                 await TaskStateManager.update_task(task_id, {
                     'status': 'error',
                     'error': f"Exit code {returncode}",
                     'progress': 0
                 })
-                
+
                 await TaskStateManager.publish_progress(task_id, {
                     'status': 'error',
                     'message': 'ダウンロードに失敗しました'
@@ -457,7 +469,11 @@ class DownloadService:
             'file_size': file_size
         })
 
-        log_info(request, f"[DOWNLOAD SUCCESS] Task: {task_id} | Size: {file_size / 1024 / 1024:.1f} MB | Path: {final_temp_path}")
+        log_info(
+            request,
+            f"[DOWNLOAD SUCCESS] Task: {task_id} | Size: {file_size / 1024 / 1024:.1f} MB | "
+            f"Path: {final_temp_path}"
+        )
 
         return final_temp_path, filename, file_size
 
@@ -516,11 +532,9 @@ async def start_download(
             # Concurrency limit check could happen here using concurrency_limiter
             # but for now we rely on simple tasks.
             # If we want to strictly limit simultaneous *downloads* (not requests), we should acquire semaphore here.
-            
             # Using semaphore logic from old code?
             # async with concurrency_limiter: ...
             # But BackgroundTasks runs after response.
-            
             # For this Refactor, we just run it.
             await DownloadService.download_with_progress(intent, locale, request, task_id)
         except Exception as e:
@@ -529,7 +543,7 @@ async def start_download(
                 'status': 'error',
                 'error': str(e)
             })
-            release_download_slot() # If we were using slots
+            release_download_slot()  # If we were using slots
 
     background_tasks.add_task(background_download)
 
@@ -624,13 +638,13 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
                     # data is bytes/str
                     if isinstance(data, bytes):
                         data = data.decode('utf-8')
-                    
+
                     await websocket.send_text(data)
-                    
+
                     # Check for completion/error/cancellation to close socket?
                     # Or let client disconnect.
                     # Usually nice to auto-close on terminal state if desired, but keeping open is safer for UI.
-                    
+
         except WebSocketDisconnect:
             pass
         finally:
@@ -645,7 +659,7 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
         try:
             while True:
                 # Keep connection open, wait for broadcast from DownloadService
-                await websocket.receive_text() # Wait for client (ping?) or just sleep
+                await websocket.receive_text()  # Wait for client (ping?) or just sleep
         except WebSocketDisconnect:
             if task_id in memory_websocket_connections:
                 memory_websocket_connections[task_id].remove(websocket)
@@ -657,12 +671,15 @@ async def download_file(request: Request, task_id: str):
     Serve the downloaded file
     """
     task_info = await TaskStateManager.get_task(task_id)
-    
+
     if not task_info:
         raise HTTPException(status_code=404, detail="タスクが見つかりません")
 
     if task_info.get('status') != 'completed':
-        raise HTTPException(status_code=400, detail=f"ダウンロードが完了していません。ステータス: {task_info.get('status')}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"ダウンロードが完了していません。ステータス: {task_info.get('status')}"
+        )
 
     file_path = task_info.get('file_path')
     if not file_path or not os.path.exists(file_path):
@@ -671,13 +688,17 @@ async def download_file(request: Request, task_id: str):
     filename = task_info.get('filename', 'video.mp4')
     file_size = task_info.get('file_size', 0)
 
-    log_info(request, f"[FILE TRANSFER START] Task: {task_id} | Filename: {filename} | Size: {file_size / 1024 / 1024:.1f} MB")
+    log_info(
+        request,
+        f"[FILE TRANSFER START] Task: {task_id} | Filename: {filename} | "
+        f"Size: {file_size / 1024 / 1024:.1f} MB"
+    )
 
     async def generate():
         try:
             async with aiofiles.open(file_path, mode='rb') as f:
                 while True:
-                    chunk = await f.read(4 * 1024 * 1024) # 4MB chunks
+                    chunk = await f.read(4 * 1024 * 1024)  # 4MB chunks
                     if not chunk:
                         break
                     yield chunk
@@ -719,7 +740,7 @@ async def cleanup_stale_tasks():
             for task in tasks:
                 task_id = task.get('task_id')
                 created_at = task.get('created_at', 0)
-                
+
                 # Expire after 1 hour?
                 if current_time - created_at > 3600:
                     file_path = task.get('file_path')
@@ -728,7 +749,7 @@ async def cleanup_stale_tasks():
                             os.remove(file_path)
                         except Exception:
                             pass
-                    
+
                     await TaskStateManager.delete_task(task_id)
         except Exception:
             pass
