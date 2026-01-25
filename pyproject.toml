@@ -1,0 +1,52 @@
+[project]
+name = "yt-dlp-api"
+version = "4.0.0"
+description = "High-performance API wrapper for yt-dlp"
+authors = [
+    {name = "yunfie", email = "yunfie.twitter+3@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.68.0",
+    "uvicorn[standard]>=0.15.0",
+    "pydantic>=2.0.0",
+    "redis>=4.0.0",
+    "python-multipart>=0.0.6",
+    "requests>=2.26.0",
+    "aiofiles>=0.8.0",
+    "httpx>=0.24.0",
+    "rich>=13.0.0",
+    "prometheus-fastapi-instrumentator>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+]
+ignore = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
