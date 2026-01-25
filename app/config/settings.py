@@ -8,20 +8,6 @@ class RedisConfig(BaseModel):
     url: str = Field(default="redis://redis:6379", description="Redis connection URL")
     socket_timeout: int = Field(default=5, description="Redis socket timeout in seconds")
 
-class DatabaseConfig(BaseModel):
-    url: str = Field(default="postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api", description="Database connection URL")
-
-class AuthConfig(BaseModel):
-    jwt_secret: str = Field(default="change-me-secret-key", description="JWT Secret Key")
-    algorithm: str = Field(default="HS256", description="JWT Algorithm")
-    access_token_expire_minutes: int = Field(default=1440, description="Token expiration in minutes")
-    
-    # SSO Settings
-    sso_enabled: bool = Field(default=False, description="Enable Google SSO")
-    google_client_id: str = Field(default="", description="Google Client ID")
-    google_client_secret: str = Field(default="", description="Google Client Secret")
-    admin_password: str = Field(default="admin", description="Fallback admin password (disabled if SSO enabled)")
-
 class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable rate limiting")
     max_requests: int = Field(default=5, ge=1, description="Max requests per window")
@@ -64,8 +50,6 @@ class ApiConfig(BaseModel):
 
 class Config(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
@@ -83,17 +67,8 @@ class Config(BaseModel):
 
     @classmethod
     def load_from_file(cls, path: str) -> "Config":
-        # Load from env vars for DB/Auth first (Priority 1)
+        # Load from env vars (Priority 1)
         env_config = {
-            "database": {
-                "url": os.getenv("DATABASE_URL", "postgresql://ytdlp_user:ytdlp_password@postgres:5432/ytdlp_api")
-            },
-            "auth": {
-                "sso_enabled": os.getenv("SSO_ENABLED", "false").lower() == "true",
-                "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
-                "google_client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
-                "admin_password": os.getenv("ADMIN_PASSWORD", "admin")
-            },
             "redis": {
                 "url": os.getenv("REDIS_URL", "redis://redis:6379")
             }
