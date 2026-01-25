@@ -129,4 +129,4 @@ X-API-Key: your_generated_api_key
 
 ## License
 
-MIT
+Apache License 2.0
