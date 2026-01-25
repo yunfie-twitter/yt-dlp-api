@@ -1,15 +1,16 @@
 import functools
-from fastapi import APIRouter, Request, Depends, HTTPException, Query
 
-from app.core.logging import log_info, log_error
-from app.infra.rate_limit import rate_limiter
-from app.utils.locale import get_locale
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from app.core.logging import log_error, log_info
 from app.i18n import i18n
-
+from app.infra.rate_limit import rate_limiter
 from app.models.response import SearchResponse
 from app.services.search import VideoSearchService
+from app.utils.locale import get_locale
 
 router = APIRouter()
+
 
 @router.get("/search", response_model=SearchResponse, dependencies=[Depends(rate_limiter)])
 async def search_videos(
