@@ -29,6 +29,7 @@ class DownloadConfig(BaseModel):
     retries: int = Field(default=3, ge=0, description="Number of retries for failed downloads")
     use_aria2c: bool = Field(default=True, description="Use aria2c for faster downloads")
     aria2c_max_connections: int = Field(default=16, ge=1, description="aria2c max connections per server")
+    worker_pool_size: int = Field(default=4, ge=1, le=32, description="Number of yt-dlp worker processes")
 
 
 class SecurityConfig(BaseModel):

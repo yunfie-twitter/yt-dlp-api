@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from redis.asyncio import Redis
 
@@ -14,6 +16,7 @@ class RuntimeState:
     ytdlp_version: str = "unknown"
     deno_version: str = "unknown"
     js_runtime: Optional[str] = None
+    worker_pool: Any = None
 
 
 state = RuntimeState()
