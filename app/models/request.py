@@ -25,6 +25,7 @@ class VideoRequest(InfoRequest):
     file_format: Optional[str] = Field(None, description="Output file extension/container (e.g. mp4, mp3)")
     # Remove ge/le constraints to allow 0, validation handled in validator
     quality: Optional[int] = Field(None, description="Video quality (0 for best/auto)")
+    proxy_index: Optional[int] = Field(None, description="Proxy index to use (from /api/v1/proxies list)")
 
     @validator("quality")
     def validate_quality(cls, v):
@@ -52,6 +53,13 @@ class VideoRequest(InfoRequest):
         if self.audio_only and not self.format:
             is_audio_only = True
 
+        # Resolve proxy: manual index → specific URL, otherwise auto (random) in command builder
+        from app.services.proxy import ProxyService
+
+        proxy_url = None
+        if self.proxy_index is not None:
+            proxy_url = ProxyService.get_by_index(self.proxy_index)
+
         return DownloadIntent(
             url=str(self.url),
             audio_only=is_audio_only,
@@ -59,4 +67,5 @@ class VideoRequest(InfoRequest):
             file_format=self.file_format,
             quality=self.quality,
             custom_format=self.format,
+            proxy_url=proxy_url,
         )

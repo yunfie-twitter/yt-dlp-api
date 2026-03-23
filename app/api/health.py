@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
+from app.config.settings import config
 from app.core.state import state
 from app.i18n import i18n
-from app.infra.redis import get_redis  # noqa: F401
+from app.services.proxy import ProxyService
 
 router = APIRouter()
 
@@ -54,6 +55,9 @@ async def health_check_full():
         "deno_version": state.deno_version,
         "redis_status": redis_status,
         "js_runtime": state.js_runtime,
+        "js_runtime_auto_detect": config.ytdlp.auto_detect_runtime,
         "active_downloads": active_downloads,
         "supported_sites_loaded": len(state.supported_sites),
+        "proxy_enabled": ProxyService.is_enabled(),
+        "proxy_count": ProxyService.get_count(),
     }
