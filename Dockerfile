@@ -16,12 +16,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 必要なランタイムパッケージ + aria2 + curl
+# 必要なランタイムパッケージ + aria2 + curl + dos2unix
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     aria2 \
     curl \
     unzip \
+    dos2unix \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
@@ -48,7 +49,7 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 # appディレクトリをコピー
 COPY ./app /app/app
 COPY ./entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN dos2unix /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # 設定ファイル用ディレクトリを作成して権限を付与
 RUN mkdir -p /config && chown -R appuser:appuser /config
