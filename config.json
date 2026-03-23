@@ -24,7 +24,8 @@
     "max_concurrent": 10,
     "timeout_seconds": 3600,
     "socket_timeout": 10,
-    "retries": 3
+    "retries": 3,
+    "worker_pool_size": 4
   },
   "security": {
     "enable_ssrf_protection": true,

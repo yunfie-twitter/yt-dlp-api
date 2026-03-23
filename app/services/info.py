@@ -6,11 +6,12 @@ import json
 from fastapi import HTTPException
 
 from app.config.settings import config
+from app.core.state import state
 from app.i18n import i18n
 from app.infra.redis import get_redis
 from app.models.request import InfoRequest
 from app.models.response import VideoInfo
-from app.services.ytdlp import SubprocessExecutor, YTDLPCommandBuilder
+from app.services.ytdlp import YTDLPCommandBuilder
 from app.utils.hash import hash_stable
 
 INFO_CACHE_TTL = 300
@@ -39,17 +40,12 @@ class VideoInfoService:
             except Exception:
                 pass
 
-        # Fetch from yt-dlp
-        cmd = YTDLPCommandBuilder.build_info_command(str(video_request.url))
+        # Fetch from yt-dlp via worker pool
+        url = str(video_request.url)
+        opts = YTDLPCommandBuilder.build_info_opts(url)
 
         try:
-            result = await SubprocessExecutor.run(cmd, timeout=30.0)
-
-            if result.returncode != 0:
-                error_msg = result.stderr.decode().strip()
-                raise HTTPException(status_code=400, detail=_("error.fetch_info_failed", reason=error_msg[:200]))
-
-            info = json.loads(result.stdout.decode())
+            info = await state.worker_pool.run_info(url, opts)
 
             is_live = info.get("is_live", False)
             if is_live and not config.ytdlp.enable_live_streams:
@@ -128,3 +124,8 @@ class VideoInfoService:
             raise
         except asyncio.TimeoutError as e:
             raise HTTPException(status_code=504, detail=_("error.timeout")) from e
+        except Exception as e:
+            error_msg = str(e)
+            if "is_live" in error_msg or "Unsupported URL" in error_msg:
+                raise HTTPException(status_code=400, detail=_("error.fetch_info_failed", reason=error_msg[:200])) from e
+            raise HTTPException(status_code=500, detail=_("error.fetch_info_failed", reason=error_msg[:200])) from e

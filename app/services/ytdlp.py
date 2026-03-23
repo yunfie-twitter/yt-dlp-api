@@ -15,7 +15,10 @@ class CompletedProcess(NamedTuple):
 
 
 class SubprocessExecutor:
-    """Execute subprocess with consistent error handling"""
+    """Execute subprocess with consistent error handling.
+
+    DEPRECATED: Use WorkerPool instead for new code.
+    """
 
     @staticmethod
     async def run(cmd: List[str], timeout: float, capture_stderr: bool = True) -> CompletedProcess:
@@ -49,7 +52,7 @@ class SubprocessExecutor:
 
 
 class YTDLPCommandBuilder:
-    """Build yt-dlp commands with aria2c support"""
+    """Build yt-dlp CLI commands and Python API option dicts."""
 
     @staticmethod
     def _add_proxy_args(cmd: List[str], proxy_url: Optional[str] = None) -> List[str]:
@@ -264,3 +267,96 @@ class YTDLPCommandBuilder:
         cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
 
         return cmd
+
+    # ------------------------------------------------------------------ #
+    # Python API option-dict builders (for WorkerPool)                    #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _base_opts(proxy_url: Optional[str] = None) -> dict:
+        """Common options shared across all operations."""
+        opts: dict = {
+            "socket_timeout": config.download.socket_timeout,
+            "retries": config.download.retries,
+            "noplaylist": True,
+        }
+
+        if not config.ytdlp.enable_live_streams:
+            opts["match_filter"] = "!is_live"
+
+        # Proxy
+        url = proxy_url
+        if url is None and ProxyService.is_enabled():
+            url = ProxyService.get_random()
+        if url:
+            opts["proxy"] = url
+
+        return opts
+
+    @staticmethod
+    def build_info_opts(url: str, proxy_url: Optional[str] = None) -> dict:
+        """Build yt-dlp Python API options dict for info extraction."""
+        opts = YTDLPCommandBuilder._base_opts(proxy_url)
+        opts["quiet"] = True
+        opts["no_warnings"] = True
+        return opts
+
+    @staticmethod
+    def build_filename_opts(url: str, format_str: str, proxy_url: Optional[str] = None) -> dict:
+        """Build yt-dlp Python API options dict for filename extraction."""
+        opts = YTDLPCommandBuilder._base_opts(proxy_url)
+        opts["format"] = format_str
+        opts["outtmpl"] = "%(title)s.%(ext)s"
+        opts["quiet"] = True
+        opts["no_warnings"] = True
+        return opts
+
+    @staticmethod
+    def build_download_opts(
+        url: str,
+        format_str: str,
+        audio_only: bool,
+        file_format: Optional[str] = None,
+        use_aria2c: bool = True,
+        proxy_url: Optional[str] = None,
+    ) -> dict:
+        """Build yt-dlp Python API options dict for downloading."""
+        opts = YTDLPCommandBuilder._base_opts(proxy_url)
+        opts["format"] = format_str
+
+        # aria2c external downloader
+        if use_aria2c:
+            opts["external_downloader"] = "aria2c"
+            opts["external_downloader_args"] = {
+                "aria2c": (
+                    "--max-connection-per-server=16 --split=16 "
+                    "--min-split-size=1M --file-allocation=none --console-log-level=warn"
+                ),
+            }
+
+        if audio_only:
+            pp: dict = {"key": "FFmpegExtractAudio"}
+            if file_format:
+                pp["preferredcodec"] = file_format
+            else:
+                pp["preferredcodec"] = "mp3"
+            opts.setdefault("postprocessors", []).append(pp)
+        else:
+            if file_format:
+                opts.setdefault("postprocessors", []).append(
+                    {"key": "FFmpegVideoRemuxer", "preferedformat": file_format}
+                )
+                if config.ytdlp.enable_gpu:
+                    opts["postprocessor_args"] = {"VideoConvertor": ["-c:v", "h264_nvenc", "-preset", "p4"]}
+            else:
+                opts["merge_output_format"] = "mp4"
+
+        return opts
+
+    @staticmethod
+    def build_search_opts(query: str, limit: int = 5, proxy_url: Optional[str] = None) -> dict:
+        """Build yt-dlp Python API options dict for search."""
+        opts = YTDLPCommandBuilder._base_opts(proxy_url)
+        opts["quiet"] = True
+        opts["no_warnings"] = True
+        return opts

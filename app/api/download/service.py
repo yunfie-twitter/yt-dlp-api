@@ -1,34 +1,34 @@
 """
-Video download service with progress tracking and aria2c support.
+Video download service with progress tracking via yt-dlp Python API worker pool.
 """
 
 import asyncio
 import functools
+import multiprocessing
 import os
-import re
 import time
 import uuid
-from collections import deque
 from contextlib import suppress
 
 from fastapi import HTTPException, Request
 
 from app.config.settings import config
 from app.core.logging import log_error, log_info
+from app.core.state import state
 from app.i18n import i18n
 from app.models.internal import DownloadIntent
 from app.services.format import FormatDecision
-from app.services.ytdlp import SubprocessExecutor, YTDLPCommandBuilder
+from app.services.ytdlp import YTDLPCommandBuilder
 from app.utils.filename import sanitize_filename
 from app.utils.hash import hash_stable
 from app.utils.locale import safe_url_for_log
 
-from .state import DOWNLOAD_TIMEOUT, STDERR_MAX_LINES, TEMP_DIR, TaskStateManager, local_processes
+from .state import DOWNLOAD_TIMEOUT, TEMP_DIR, TaskStateManager
 
 
 class DownloadService:
     """
-    Video download service with progress tracking and aria2c support
+    Video download service with progress tracking via worker pool
     """
 
     @staticmethod
@@ -66,18 +66,14 @@ class DownloadService:
             log_error(request, f"[FORMAT ERROR] Task: {task_id} | {str(e)}")
             raise Exception(f"フォーマット決定エラー: {str(e)}") from e
 
-        # 2. Get Filename (metadata)
+        # 2. Get Filename (metadata) via worker pool
         await TaskStateManager.publish_progress(
             task_id, {"status": "fetching_info", "progress": 20, "message": "ファイル名を取得中... (2/3)"}
         )
 
-        filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str, proxy_url=intent.proxy_url)
+        filename_opts = YTDLPCommandBuilder.build_filename_opts(intent.url, format_str, proxy_url=intent.proxy_url)
         try:
-            result = await SubprocessExecutor.run(filename_cmd)
-            if result.returncode != 0:
-                raise Exception(result.stderr.decode())
-
-            raw_filename = result.stdout.decode().strip()
+            raw_filename = await state.worker_pool.run_filename(intent.url, filename_opts)
             filename = sanitize_filename(raw_filename)
 
             # Apply file format if specified
@@ -100,10 +96,10 @@ class DownloadService:
         temp_id = str(uuid.uuid4())
         temp_path_template = os.path.join(TEMP_DIR, f"{temp_id}.%(ext)s")
 
-        # 4. Build Download Command with aria2c
+        # 4. Build Download Options
         use_aria2c = config.download.use_aria2c
 
-        cmd = YTDLPCommandBuilder.build_stream_command(
+        download_opts = YTDLPCommandBuilder.build_download_opts(
             intent.url,
             format_str,
             audio_only=intent.audio_only,
@@ -111,15 +107,6 @@ class DownloadService:
             use_aria2c=use_aria2c,
             proxy_url=intent.proxy_url,
         )
-
-        try:
-            cmd.index("-o")
-        except ValueError:
-            cmd.extend(["-o", temp_path_template])
-
-        # Add progress flags
-        cmd = [c for c in cmd if c != "--no-progress"]
-        cmd.extend(["--newline", "--progress"])
 
         if use_aria2c:
             log_info(
@@ -145,144 +132,99 @@ class DownloadService:
             },
         )
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL
-        )
+        # 5. Run download in worker pool with progress tracking
+        progress_queue: multiprocessing.Queue = multiprocessing.Queue()
 
-        # Store process locally for cancellation
-        local_processes[task_id] = process
+        # Store a cancellation sentinel so we can mark cancelled state
+        cancel_event = asyncio.Event()
 
-        stderr_lines = deque(maxlen=STDERR_MAX_LINES)
+        async def monitor_progress():
+            """Read progress from the multiprocessing queue and publish updates."""
+            last_progress_time = 0.0
+            loop = asyncio.get_running_loop()
 
-        async def parse_progress():
-            """
-            Read stdout/stderr stream and parse progress
-            """
-            nonlocal process
-            # Limit update frequency to reduce Redis load
-            last_progress_time = 0
+            while not cancel_event.is_set():
+                try:
+                    msg = await loop.run_in_executor(None, _queue_get_nowait, progress_queue)
+                except Exception:
+                    await asyncio.sleep(0.3)
+                    continue
 
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
+                if msg is None:
+                    await asyncio.sleep(0.3)
+                    continue
 
-                decoded = line.decode().strip()
-
-                progress_data = {"status": "downloading"}
+                status = msg.get("status")
+                progress_data: dict = {"status": "downloading"}
                 updated = False
 
-                # Pattern 1: yt-dlp standard output
-                if "[download]" in decoded:
-                    # [download]  23.5% of 100.00MiB at 5.00MiB/s ETA 00:15
-                    percentage_match = re.search(r"(\d+(\.\d+)?)%", decoded)
-                    if percentage_match:
-                        raw_percentage = float(percentage_match.group(1))
-                        # Scale 0-100 to 20-95 range (0-20 is init, 95-100 is post-processing)
-                        scaled_percentage = 20 + (raw_percentage * 0.75)
-
-                        progress_data["progress"] = round(scaled_percentage, 1)
+                if status == "downloading":
+                    total = msg.get("total_bytes")
+                    downloaded = msg.get("downloaded_bytes")
+                    if total and downloaded and total > 0:
+                        raw_pct = (downloaded / total) * 100
+                        scaled = 20 + (raw_pct * 0.75)
+                        progress_data["progress"] = round(scaled, 1)
                         updated = True
 
-                        size_match = re.search(r"of\s+([\d.]+[KMG]iB)", decoded)
-                        if size_match:
-                            progress_data["total_size"] = size_match.group(1)
+                    speed = msg.get("speed")
+                    if speed:
+                        progress_data["speed"] = _format_speed(speed)
 
-                        speed_match = re.search(r"at\s+([\d.]+[KMG]iB/s)", decoded)
-                        if speed_match:
-                            progress_data["speed"] = speed_match.group(1)
+                    eta = msg.get("eta")
+                    if eta is not None:
+                        progress_data["eta"] = _format_eta(eta)
 
-                        eta_match = re.search(r"ETA\s+(\d{2}:\d{2})", decoded)
-                        if eta_match:
-                            progress_data["eta"] = eta_match.group(1)
+                    if total:
+                        progress_data["total_size"] = _format_bytes(total)
 
-                # Pattern 2: aria2c output (via yt-dlp)
-                elif "[#" in decoded and "CN:" in decoded:
-                    # [#65f80b 26MiB/30MiB(86%) CN:16 DL:4.5MiB/s ETA:1s]
-                    percentage_match = re.search(r"\((\d+)%\)", decoded)
-                    if percentage_match:
-                        raw_percentage = float(percentage_match.group(1))
-                        scaled_percentage = 20 + (raw_percentage * 0.75)
-
-                        progress_data["progress"] = round(scaled_percentage, 1)
-                        updated = True
-
-                        size_match = re.search(r"/([\d.]+[KMG]iB)", decoded)
-                        if size_match:
-                            progress_data["total_size"] = size_match.group(1)
-
-                        speed_match = re.search(r"DL:([\d.]+[KMG]iB/s)", decoded)
-                        if speed_match:
-                            progress_data["speed"] = speed_match.group(1)
-
-                        eta_match = re.search(r"ETA:(\w+)", decoded)
-                        if eta_match:
-                            progress_data["eta"] = eta_match.group(1)
-
-                # Check for processing
-                elif "Destination:" in decoded or "Merging" in decoded or "[Merger]" in decoded:
-                    progress_data["progress"] = 98.0
+                elif status == "finished":
+                    progress_data["progress"] = 95.0
                     progress_data["message"] = "変換・結合中..."
                     updated = True
 
-                # Publish if updated and enough time passed (e.g. 0.5s)
                 if updated:
-                    current_time = time.time()
-                    if current_time - last_progress_time > 0.5:
-                        # Save to state
+                    now = time.time()
+                    if now - last_progress_time > 0.5:
                         await TaskStateManager.update_task(task_id, progress_data)
-                        # Publish
                         await TaskStateManager.publish_progress(task_id, progress_data)
-                        last_progress_time = current_time
+                        last_progress_time = now
 
-        async def drain_stderr():
-            try:
-                while True:
-                    line = await process.stderr.readline()
-                    if not line:
-                        break
-                    decoded = line.decode().strip()
-                    if process.returncode is None or process.returncode != 0:
-                        stderr_lines.append(decoded)
-            except Exception:
-                pass
-
-        progress_task = asyncio.create_task(parse_progress())
-        stderr_task = asyncio.create_task(drain_stderr())
+        progress_task = asyncio.create_task(monitor_progress())
 
         try:
-            # Wait with timeout
-            returncode = await asyncio.wait_for(process.wait(), timeout=DOWNLOAD_TIMEOUT)
+            result = await asyncio.wait_for(
+                state.worker_pool.run_download(
+                    intent.url,
+                    download_opts,
+                    temp_path_template,
+                    progress_queue,
+                ),
+                timeout=DOWNLOAD_TIMEOUT,
+            )
 
-            # Remove from local processes immediately
-            if task_id in local_processes:
-                del local_processes[task_id]
-
-            # Wait for output tasks to finish
+            # Stop progress monitor
+            cancel_event.set()
             await progress_task
-            await stderr_task
 
-            # Check if cancelled via flag (double check)
+            # Check if cancelled via flag
             task_info = await TaskStateManager.get_task(task_id)
             if task_info and task_info.get("cancelled"):
                 log_info(request, f"[CANCELLED] Task: {task_id}")
                 raise Exception("ダウンロードがキャンセルされました")
 
-            if returncode != 0:
-                error_summary = "\n".join(stderr_lines)
-                log_error(
-                    request,
-                    f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {returncode} | Error: {error_summary[:200]}",
-                )
+            retcode = result.get("returncode", 1)
+            if retcode != 0:
+                log_error(request, f"[DOWNLOAD FAILED] Task: {task_id} | Return code: {retcode}")
 
                 await TaskStateManager.update_task(
-                    task_id, {"status": "error", "error": f"Exit code {returncode}", "progress": 0}
+                    task_id, {"status": "error", "error": f"Exit code {retcode}", "progress": 0}
                 )
 
                 await TaskStateManager.publish_progress(
                     task_id, {"status": "error", "message": "ダウンロードに失敗しました"}
                 )
-                raise Exception(f"yt-dlp failed: {error_summary[:200]}")
+                raise Exception(f"yt-dlp failed with exit code {retcode}")
 
             await TaskStateManager.update_task(task_id, {"progress": 100.0, "status": "completed"})
 
@@ -293,26 +235,21 @@ class DownloadService:
             )
 
         except asyncio.TimeoutError:
+            cancel_event.set()
+            with suppress(asyncio.CancelledError):
+                progress_task.cancel()
+                await progress_task
             log_error(request, f"[TIMEOUT] Task: {task_id} | Download timeout after {DOWNLOAD_TIMEOUT}s")
-            # Kill process
-            with suppress(ProcessLookupError):
-                process.terminate()
-            # Give it a moment, then kill
-            await asyncio.sleep(1)
-            if process.returncode is None:
-                process.kill()
-            await process.wait()
             raise Exception("ダウンロードがタイムアウトしました") from None
         except Exception as e:
+            cancel_event.set()
+            with suppress(asyncio.CancelledError):
+                progress_task.cancel()
+                await progress_task
             log_error(request, f"[PROCESS ERROR] Task: {task_id} | {str(e)}")
-            # Cleanup process if running
-            if process.returncode is None:
-                with suppress(ProcessLookupError):
-                    process.kill()
-                    await process.wait()
             raise e
 
-        # 5. Locate Output File
+        # 6. Locate Output File
         found_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(temp_id)]
 
         if not found_files:
@@ -330,3 +267,37 @@ class DownloadService:
         )
 
         return final_temp_path, filename, file_size
+
+
+def _queue_get_nowait(q: multiprocessing.Queue):
+    """Non-blocking get from multiprocessing.Queue. Returns None if empty."""
+    try:
+        return q.get_nowait()
+    except Exception:
+        return None
+
+
+def _format_speed(speed: float) -> str:
+    """Format speed in bytes/s to human-readable string."""
+    if speed >= 1024 * 1024:
+        return f"{speed / 1024 / 1024:.1f}MiB/s"
+    if speed >= 1024:
+        return f"{speed / 1024:.1f}KiB/s"
+    return f"{speed:.0f}B/s"
+
+
+def _format_bytes(size: float) -> str:
+    """Format bytes to human-readable string."""
+    if size >= 1024 * 1024 * 1024:
+        return f"{size / 1024 / 1024 / 1024:.2f}GiB"
+    if size >= 1024 * 1024:
+        return f"{size / 1024 / 1024:.2f}MiB"
+    if size >= 1024:
+        return f"{size / 1024:.1f}KiB"
+    return f"{size:.0f}B"
+
+
+def _format_eta(eta: int) -> str:
+    """Format ETA seconds to MM:SS string."""
+    minutes, seconds = divmod(int(eta), 60)
+    return f"{minutes:02d}:{seconds:02d}"

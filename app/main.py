@@ -111,6 +111,13 @@ async def startup_event():
     await init_redis()
     await _detect_runtime()
 
+    # Start worker pool
+    from app.services.worker_pool import WorkerPool
+
+    pool = WorkerPool(pool_size=config.download.worker_pool_size)
+    pool.start()
+    state.worker_pool = pool
+
     # Security Warnings
     if not config.auth.api_key_enabled:
         logging.warning("⚠️  [SECURITY WARNING] API Key Authentication is DISABLED. Anyone can access the API.")
@@ -129,4 +136,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if state.worker_pool is not None:
+        state.worker_pool.stop()
+        state.worker_pool = None
     await close_redis()
