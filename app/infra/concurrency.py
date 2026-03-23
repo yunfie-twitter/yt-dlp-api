@@ -63,13 +63,7 @@ class ConcurrencyLimiter:
 
             try:
                 result = await redis.eval(
-                    self.lua_script,
-                    2,
-                    counter_key,
-                    slot_key,
-                    config.download.max_concurrent,
-                    slot_ttl,
-                    counter_ttl
+                    self.lua_script, 2, counter_key, slot_key, config.download.max_concurrent, slot_ttl, counter_ttl
                 )
                 allowed = bool(result)
 
@@ -89,10 +83,7 @@ class ConcurrencyLimiter:
         if not allowed:
             locale = get_locale(request.headers.get("accept-language"))
             _ = functools.partial(i18n.get, locale=locale)
-            raise HTTPException(
-                status_code=503,
-                detail=_("error.server_busy", max=config.download.max_concurrent)
-            )
+            raise HTTPException(status_code=503, detail=_("error.server_busy", max=config.download.max_concurrent))
 
         return True
 
@@ -104,18 +95,18 @@ class ConcurrencyLimiter:
 
 async def release_download_slot(request: Request):
     """Release download slot"""
-    if not hasattr(request.state, 'download_slot_acquired') or not request.state.download_slot_acquired:
+    if not hasattr(request.state, "download_slot_acquired") or not request.state.download_slot_acquired:
         return
 
     redis = get_redis()
 
-    if redis and hasattr(request.state, 'download_slot_key'):
+    if redis and hasattr(request.state, "download_slot_key"):
         try:
             await redis.delete(request.state.download_slot_key)
             await redis.decr("active_downloads_count")
         except Exception:
             pass
-    elif not redis and hasattr(request.state, 'memory_request_id'):
+    elif not redis and hasattr(request.state, "memory_request_id"):
         concurrency_limiter.release_memory(request.state.memory_request_id)
 
 

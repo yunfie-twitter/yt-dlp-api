@@ -1,11 +1,14 @@
 import pytest
 from httpx import AsyncClient
-from app.main import app
+
 from app.config.settings import config
+from app.main import app
+
 
 @pytest.fixture
 def anyio_backend():
-    return 'asyncio'
+    return "asyncio"
+
 
 @pytest.mark.asyncio
 async def test_health_check():
@@ -15,13 +18,14 @@ async def test_health_check():
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
+
 @pytest.mark.asyncio
 async def test_auth_protected_endpoint_without_key():
     """Test accessing protected endpoint without key when auth is enabled"""
     # Force enable auth for test
     original_setting = config.auth.api_key_enabled
     config.auth.api_key_enabled = True
-    
+
     try:
         async with AsyncClient(app=app, base_url="http://test") as ac:
             # Assuming /api/v1/info is a valid protected endpoint based on router structure
@@ -31,6 +35,7 @@ async def test_auth_protected_endpoint_without_key():
             assert response.status_code in [403, 503]
     finally:
         config.auth.api_key_enabled = original_setting
+
 
 @pytest.mark.asyncio
 async def test_metrics_endpoint():

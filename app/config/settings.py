@@ -78,7 +78,7 @@ class Config(BaseModel):
 
     def save_to_file(self, path: str):
         try:
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 f.write(self.model_dump_json(indent=2))
         except OSError as e:
             logging.error(f"Failed to save config to {path}: {e}")
@@ -86,11 +86,7 @@ class Config(BaseModel):
     @classmethod
     def load_from_file(cls, path: str) -> "Config":
         # Load from env vars (Priority 1)
-        env_config = {
-            "redis": {
-                "url": os.getenv("REDIS_URL", "redis://redis:6379")
-            }
-        }
+        env_config = {"redis": {"url": os.getenv("REDIS_URL", "redis://redis:6379")}}
 
         if not os.path.exists(path):
             cfg = cls()
@@ -113,7 +109,7 @@ class Config(BaseModel):
             return new_cfg
 
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 content = f.read()
                 if not content.strip():
                     return cls()

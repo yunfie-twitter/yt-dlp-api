@@ -74,13 +74,7 @@ class RedisRateLimiter:
 
         if redis:
             try:
-                result = await redis.eval(
-                    self.lua_script,
-                    1,
-                    key,
-                    self.max_requests,
-                    self.window_seconds
-                )
+                result = await redis.eval(self.lua_script, 1, key, self.max_requests, self.window_seconds)
                 allowed, ttl = result
             except Exception:
                 # Fallback to allow if Redis call fails mid-operation?
@@ -97,9 +91,7 @@ class RedisRateLimiter:
             locale = get_locale(request.headers.get("accept-language"))
             _ = functools.partial(i18n.get, locale=locale)
             raise HTTPException(
-                status_code=429,
-                detail=_("error.rate_limit", seconds=ttl),
-                headers={"Retry-After": str(ttl)}
+                status_code=429, detail=_("error.rate_limit", seconds=ttl), headers={"Retry-After": str(ttl)}
             )
 
         return True

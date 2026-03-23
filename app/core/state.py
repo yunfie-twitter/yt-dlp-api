@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 @dataclass
 class RuntimeState:
     """Centralized runtime state"""
+
     redis: Optional[Redis] = None
     supported_sites: Tuple[str, ...] = field(default_factory=tuple)
     supported_sites_etag: str = ""

@@ -17,7 +17,7 @@ class FormatDecision:
         if intent.audio_only:
             # For audio-only downloads, always use bestaudio
             # The actual format conversion is handled by -x --audio-format
-            return 'bestaudio/best'
+            return "bestaudio/best"
 
         if intent.quality:
             return (
@@ -39,21 +39,17 @@ class FormatDecision:
         if intent.custom_format:
             return MediaMetadata(
                 format_str=format_str,
-                ext='mp4',  # Default fallback, actual file extension determined by yt-dlp
-                media_type='application/octet-stream'
+                ext="mp4",  # Default fallback, actual file extension determined by yt-dlp
+                media_type="application/octet-stream",
             )
 
         if intent.audio_only:
             af = str(intent.audio_format).lower() if intent.audio_format else ""
-            if 'mp3' in af:
-                return MediaMetadata(format_str=format_str, ext='mp3', media_type='audio/mpeg')
-            elif 'm4a' in af:
-                return MediaMetadata(format_str=format_str, ext='m4a', media_type='audio/mp4')
+            if "mp3" in af:
+                return MediaMetadata(format_str=format_str, ext="mp3", media_type="audio/mpeg")
+            elif "m4a" in af:
+                return MediaMetadata(format_str=format_str, ext="m4a", media_type="audio/mp4")
             else:
-                return MediaMetadata(format_str=format_str, ext='mp3', media_type='audio/mpeg')
+                return MediaMetadata(format_str=format_str, ext="mp3", media_type="audio/mpeg")
 
-        return MediaMetadata(
-            format_str=format_str,
-            ext='mp4',
-            media_type='application/octet-stream'
-        )
+        return MediaMetadata(format_str=format_str, ext="mp4", media_type="application/octet-stream")

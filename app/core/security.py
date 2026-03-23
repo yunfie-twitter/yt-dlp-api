@@ -13,6 +13,7 @@ SSRF_CACHE_TTL = 300
 
 class UrlValidationResult(Enum):
     """URL validation result without throwing exceptions"""
+
     OK = auto()
     BLOCKED = auto()
     INVALID = auto()
@@ -52,11 +53,7 @@ class SecurityValidator:
 
             # Async DNS resolution
             try:
-                addr_info = await asyncio.to_thread(
-                    socket.getaddrinfo,
-                    hostname,
-                    None
-                )
+                addr_info = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
                 ips = [info[4][0] for info in addr_info]
             except socket.gaierror:
                 # DNS failed - cache as OK and let yt-dlp handle it
@@ -88,11 +85,7 @@ class SecurityValidator:
 
             # Cache result
             if redis:
-                await redis.setex(
-                    cache_key,
-                    SSRF_CACHE_TTL,
-                    "blocked" if is_blocked else "ok"
-                )
+                await redis.setex(cache_key, SSRF_CACHE_TTL, "blocked" if is_blocked else "ok")
 
             return UrlValidationResult.BLOCKED if is_blocked else UrlValidationResult.OK
 

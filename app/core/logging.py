@@ -6,20 +6,12 @@ from fastapi import Request
 logger = logging.getLogger(__name__)
 
 
-def log_with_context(
-    request: Request,
-    level: int,
-    message: str,
-    **kwargs: Any
-) -> None:
+def log_with_context(request: Request, level: int, message: str, **kwargs: Any) -> None:
     """
     Log with request context.
     Automatically includes request_id for tracing.
     """
-    extra = {
-        "request_id": getattr(request.state, "request_id", "unknown"),
-        **kwargs
-    }
+    extra = {"request_id": getattr(request.state, "request_id", "unknown"), **kwargs}
     logger.log(level, message, extra=extra)
 
 

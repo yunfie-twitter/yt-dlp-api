@@ -47,14 +47,11 @@ class VideoInfoService:
 
             if result.returncode != 0:
                 error_msg = result.stderr.decode().strip()
-                raise HTTPException(
-                    status_code=400,
-                    detail=_("error.fetch_info_failed", reason=error_msg[:200])
-                )
+                raise HTTPException(status_code=400, detail=_("error.fetch_info_failed", reason=error_msg[:200]))
 
             info = json.loads(result.stdout.decode())
 
-            is_live = info.get('is_live', False)
+            is_live = info.get("is_live", False)
             if is_live and not config.ytdlp.enable_live_streams:
                 raise HTTPException(status_code=400, detail=_("error.live_not_supported"))
 
@@ -73,24 +70,14 @@ class VideoInfoService:
             audio_formats = [f for f in all_formats if is_audio_only(f)]
 
             # Select top video formats (prioritize resolution, then filesize)
-            top_videos = heapq.nlargest(
-                15,
-                video_formats,
-                key=lambda f: (f.get("height") or 0, f.get("filesize") or 0)
-            )
+            top_videos = heapq.nlargest(15, video_formats, key=lambda f: (f.get("height") or 0, f.get("filesize") or 0))
 
             # Select top audio formats (prioritize filesize/bitrate)
-            top_audios = heapq.nlargest(
-                5,
-                audio_formats,
-                key=lambda f: (f.get("filesize") or 0, f.get("tbr") or 0)
-            )
+            top_audios = heapq.nlargest(5, audio_formats, key=lambda f: (f.get("filesize") or 0, f.get("tbr") or 0))
 
             # Combine and sort by generic quality indicator for display
             selected_formats = sorted(
-                top_videos + top_audios,
-                key=lambda f: (f.get("height") or 0, f.get("filesize") or 0),
-                reverse=True
+                top_videos + top_audios, key=lambda f: (f.get("height") or 0, f.get("filesize") or 0), reverse=True
             )
 
             video_info = VideoInfo(
@@ -123,7 +110,7 @@ class VideoInfoService:
                 ],
                 thumbnail=info.get("thumbnail"),
                 webpage_url=info.get("webpage_url", str(video_request.url)),
-                is_live=is_live
+                is_live=is_live,
             )
 
             # Cache result
