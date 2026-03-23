@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timedelta
 
 from authlib.integrations.starlette_client import OAuth
@@ -17,11 +16,11 @@ class AuthService:
             self.oauth = OAuth()
             if config.auth.sso_provider == "google":
                 self.oauth.register(
-                    name='google',
-                    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+                    name="google",
+                    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
                     client_id=config.auth.sso_client_id,
                     client_secret=config.auth.sso_client_secret,
-                    client_kwargs={'scope': 'openid email profile'}
+                    client_kwargs={"scope": "openid email profile"},
                 )
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:

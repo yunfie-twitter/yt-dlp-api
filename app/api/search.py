@@ -16,7 +16,7 @@ router = APIRouter()
 async def search_videos(
     request: Request,
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(5, ge=1, le=20, description="Maximum results")
+    limit: int = Query(5, ge=1, le=20, description="Maximum results"),
 ):
     """Search videos using yt-dlp's ytsearch."""
     locale = get_locale(request.headers.get("accept-language"))

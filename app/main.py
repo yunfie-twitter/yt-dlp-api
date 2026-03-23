@@ -11,11 +11,7 @@ from app.core.auth import create_api_key, get_api_key, verify_issuance_permissio
 from app.infra.redis import close_redis, init_redis
 
 # 1. Create App
-app = FastAPI(
-    title=config.api.title,
-    description=config.api.description,
-    version=config.api.version
-)
+app = FastAPI(title=config.api.title, description=config.api.description, version=config.api.version)
 
 # 2. CORS
 app.add_middleware(
@@ -31,24 +27,9 @@ app.add_middleware(
 app.include_router(health.router, tags=["Health"])
 
 # Protected API v1 endpoints
-app.include_router(
-    info.router,
-    prefix="/api/v1",
-    tags=["Info"],
-    dependencies=[Depends(get_api_key)]
-)
-app.include_router(
-    download.router,
-    prefix="/api/v1",
-    tags=["Download"],
-    dependencies=[Depends(get_api_key)]
-)
-app.include_router(
-    search.router,
-    prefix="/api/v1",
-    tags=["Search"],
-    dependencies=[Depends(get_api_key)]
-)
+app.include_router(info.router, prefix="/api/v1", tags=["Info"], dependencies=[Depends(get_api_key)])
+app.include_router(download.router, prefix="/api/v1", tags=["Download"], dependencies=[Depends(get_api_key)])
+app.include_router(search.router, prefix="/api/v1", tags=["Search"], dependencies=[Depends(get_api_key)])
 
 
 # Auth Router

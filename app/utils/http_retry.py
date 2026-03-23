@@ -5,9 +5,7 @@ import httpx
 
 # Base constants
 UA_CHROME = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 
 UA_SAFARI = (
@@ -44,10 +42,7 @@ class HttpRetryClient:
         }
 
     async def fetch_with_retry(
-        self,
-        url: str,
-        original_page_url: Optional[str] = None,
-        incoming_range: Optional[str] = None
+        self, url: str, original_page_url: Optional[str] = None, incoming_range: Optional[str] = None
     ) -> httpx.Response:
         """
         Fetch URL with intelligent 403 retry strategy.
@@ -80,11 +75,13 @@ class HttpRetryClient:
             return resp
 
         # 3. Retry: Add Sec-Fetch headers
-        headers.update({
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-Mode": "no-cors",
-            "Sec-Fetch-Dest": "video",
-        })
+        headers.update(
+            {
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Dest": "video",
+            }
+        )
         resp = await self._send(url, headers)
         if resp.status_code != 403:
             return resp

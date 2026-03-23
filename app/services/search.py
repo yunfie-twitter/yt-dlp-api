@@ -42,35 +42,30 @@ class VideoSearchService:
 
             results: List[SearchResult] = []
             if stdout:
-                lines = stdout.strip().split('\n')
+                lines = stdout.strip().split("\n")
                 for line in lines:
                     if not line.strip():
                         continue
                     try:
                         info = json.loads(line)
-                        results.append(SearchResult(
-                            title=info.get('title', 'Unknown'),
-                            url=info.get('webpage_url', info.get('url', '')),
-                            thumbnail=info.get('thumbnail'),
-                            duration=info.get('duration'),
-                            uploader=info.get('uploader')
-                        ))
+                        results.append(
+                            SearchResult(
+                                title=info.get("title", "Unknown"),
+                                url=info.get("webpage_url", info.get("url", "")),
+                                thumbnail=info.get("thumbnail"),
+                                duration=info.get("duration"),
+                                uploader=info.get("uploader"),
+                            )
+                        )
                     except json.JSONDecodeError:
                         continue
 
-            response = SearchResponse(
-                results=results,
-                query=query
-            )
+            response = SearchResponse(results=results, query=query)
 
             # Cache result
             if redis:
                 try:
-                    await redis.setex(
-                        cache_key,
-                        SEARCH_CACHE_TTL,
-                        response.json()
-                    )
+                    await redis.setex(cache_key, SEARCH_CACHE_TTL, response.json())
                 except Exception:
                     pass
 

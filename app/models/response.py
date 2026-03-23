@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class VideoInfo(BaseModel):
     """Video information response"""
+
     title: str
     uploader: Optional[str] = None
     duration: Optional[int] = None
@@ -15,6 +16,7 @@ class VideoInfo(BaseModel):
 
 class SearchResult(BaseModel):
     """Single search result"""
+
     title: str
     url: str
     thumbnail: Optional[str] = None
@@ -24,5 +26,6 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     """Search results response"""
+
     results: List[SearchResult]
     query: str

@@ -9,7 +9,7 @@ from app.models.internal import DownloadIntent
 class InfoRequest(BaseModel):
     url: HttpUrl = Field(..., description="Video URL")
 
-    @validator('url')
+    @validator("url")
     def validate_url_syntax(cls, v):
         """Validate URL syntax only (SSRF check done at endpoint)"""
         parsed = urlparse(str(v))
@@ -26,7 +26,7 @@ class VideoRequest(InfoRequest):
     # Remove ge/le constraints to allow 0, validation handled in validator
     quality: Optional[int] = Field(None, description="Video quality (0 for best/auto)")
 
-    @validator('quality')
+    @validator("quality")
     def validate_quality(cls, v):
         """Validate quality range, treating 0 as None (auto)"""
         if v is None or v == 0:
@@ -58,5 +58,5 @@ class VideoRequest(InfoRequest):
             audio_format=self.audio_format,
             file_format=self.file_format,
             quality=self.quality,
-            custom_format=self.format
+            custom_format=self.format,
         )

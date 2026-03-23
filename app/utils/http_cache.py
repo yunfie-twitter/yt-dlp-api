@@ -10,9 +10,9 @@ from urllib.parse import urlparse, urlunparse
 CACHE_ROOT = os.environ.get("YTDLP_PROXY_CACHE_DIR", "cache")
 
 CACHE_POLICY = {
-    ".ts": 86400,   # 1 day
+    ".ts": 86400,  # 1 day
     ".m4s": 86400,
-    ".m3u8": 5,     # live playlist safety
+    ".m3u8": 5,  # live playlist safety
 }
 
 MAX_CACHE_BYTES = 10 * 1024 * 1024

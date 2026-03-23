@@ -21,28 +21,19 @@ async def get_api_key(
         return True
 
     if not api_key_header:
-        raise HTTPException(
-            status_code=403,
-            detail="Could not validate credentials"
-        )
+        raise HTTPException(status_code=403, detail="Could not validate credentials")
 
     redis = get_redis()
     if redis:
         # Check Redis for key
         key_data = await redis.get(f"apikey:{api_key_header}")
         if not key_data:
-            raise HTTPException(
-                status_code=403,
-                detail="Invalid API Key"
-            )
+            raise HTTPException(status_code=403, detail="Invalid API Key")
         return json.loads(key_data)
     else:
         # Fallback for no Redis (Development only - usually we want Redis)
         # If Redis is missing but Auth enabled, fail secure
-        raise HTTPException(
-            status_code=503,
-            detail="Auth service unavailable"
-        )
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
 
 
 async def create_api_key(origin: str, description: str = None) -> dict:
@@ -50,12 +41,7 @@ async def create_api_key(origin: str, description: str = None) -> dict:
     Generate a new API Key and store in Redis
     """
     new_key = secrets.token_urlsafe(32)
-    key_data = {
-        "key": new_key,
-        "origin": origin,
-        "description": description,
-        "created_at": time.time()
-    }
+    key_data = {"key": new_key, "origin": origin, "description": description, "created_at": time.time()}
 
     redis = get_redis()
     if redis:
@@ -80,8 +66,5 @@ async def verify_issuance_permission(request: Request):
     # Standard CORS check usually relies on Origin.
 
     if not origin or origin not in allowed_origins:
-        raise HTTPException(
-            status_code=403,
-            detail="Origin not allowed to issue API keys"
-        )
+        raise HTTPException(status_code=403, detail="Origin not allowed to issue API keys")
     return True

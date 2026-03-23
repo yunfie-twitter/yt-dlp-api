@@ -16,7 +16,7 @@ async def root():
         "version": "4.0.0",
         "deno_version": state.deno_version,
         "ytdlp_version": state.ytdlp_version,
-        "redis_enabled": state.redis is not None
+        "redis_enabled": state.redis is not None,
     }
 
 
@@ -31,10 +31,7 @@ async def health_check():
         except Exception:
             redis_status = i18n.get("response.redis_disconnected")
 
-    return {
-        "status": i18n.get("health.status"),
-        "redis": redis_status
-    }
+    return {"status": i18n.get("health.status"), "redis": redis_status}
 
 
 @router.get("/health/full")
@@ -58,5 +55,5 @@ async def health_check_full():
         "redis_status": redis_status,
         "js_runtime": state.js_runtime,
         "active_downloads": active_downloads,
-        "supported_sites_loaded": len(state.supported_sites)
+        "supported_sites_loaded": len(state.supported_sites),
     }

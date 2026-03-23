@@ -16,7 +16,7 @@ async def init_redis() -> None:
             config.redis.url,
             encoding="utf-8",
             decode_responses=True,
-            socket_connect_timeout=config.redis.socket_timeout
+            socket_connect_timeout=config.redis.socket_timeout,
         )
         await redis_client.ping()
 
@@ -24,11 +24,7 @@ async def init_redis() -> None:
         keys = []
         cursor = 0
         while True:
-            cursor, partial_keys = await redis_client.scan(
-                cursor,
-                match="active_download:*",
-                count=100
-            )
+            cursor, partial_keys = await redis_client.scan(cursor, match="active_download:*", count=100)
             keys.extend(partial_keys)
             if cursor == 0:
                 break
