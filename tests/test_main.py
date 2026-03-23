@@ -1,8 +1,10 @@
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.config.settings import config
 from app.main import app
+
+transport = ASGITransport(app=app)
 
 
 @pytest.fixture
@@ -13,7 +15,7 @@ def anyio_backend():
 @pytest.mark.asyncio
 async def test_health_check():
     """Test public health endpoint"""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -27,7 +29,7 @@ async def test_auth_protected_endpoint_without_key():
     config.auth.api_key_enabled = True
 
     try:
-        async with AsyncClient(app=app, base_url="http://test") as ac:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
             # Assuming /api/v1/info is a valid protected endpoint based on router structure
             # We use a dummy payload for POST or just verify 403 on method not allowed or actual path
             # Let's try to hit an endpoint that exists. /api/v1/search is GET.
@@ -40,6 +42,6 @@ async def test_auth_protected_endpoint_without_key():
 @pytest.mark.asyncio
 async def test_metrics_endpoint():
     """Test metrics endpoint exposure"""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/metrics")
     assert response.status_code == 200
