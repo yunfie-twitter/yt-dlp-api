@@ -218,7 +218,7 @@ class DownloadService:
         use_aria2c = config.download.use_aria2c
 
         cmd = YTDLPCommandBuilder.build_stream_command(
-            intent.url, format_str, audio_only=intent.audio_only, cookies_content=intent.cookies, use_aria2c=use_aria2c
+            intent.url, format_str, audio_only=intent.audio_only, file_format=intent.file_format, use_aria2c=use_aria2c
         )
 
         try:
@@ -479,14 +479,7 @@ async def start_download(request: Request, video_request: VideoRequest, backgrou
     }
 
     # Convert Request model to Internal Intent
-    intent = DownloadIntent(
-        url=str(video_request.url),
-        audio_only=video_request.audio_only,
-        format_id=video_request.format_id,
-        quality=video_request.quality,
-        file_format=video_request.file_format,
-        cookies=video_request.cookies,
-    )
+    intent = video_request.to_intent()
 
     await TaskStateManager.save_task(task_id, initial_state)
 

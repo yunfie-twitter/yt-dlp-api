@@ -12,3 +12,13 @@ class DownloadIntent(BaseModel):
     quality: Optional[int] = None
     file_format: Optional[str] = None
     cookies: Optional[str] = None
+    audio_format: Optional[str] = None
+    custom_format: Optional[str] = None
+
+
+class MediaMetadata(BaseModel):
+    """Metadata for resolved media format"""
+
+    format_str: str
+    ext: str
+    media_type: str
