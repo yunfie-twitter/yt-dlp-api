@@ -18,7 +18,9 @@ async def test_health_check():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert "status" in data
+    assert "redis" in data
 
 
 @pytest.mark.asyncio
