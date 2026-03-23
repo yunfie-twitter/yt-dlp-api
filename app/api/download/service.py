@@ -71,7 +71,7 @@ class DownloadService:
             task_id, {"status": "fetching_info", "progress": 20, "message": "ファイル名を取得中... (2/3)"}
         )
 
-        filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str)
+        filename_cmd = YTDLPCommandBuilder.build_filename_command(intent.url, format_str, proxy_url=intent.proxy_url)
         try:
             result = await SubprocessExecutor.run(filename_cmd)
             if result.returncode != 0:
@@ -104,7 +104,12 @@ class DownloadService:
         use_aria2c = config.download.use_aria2c
 
         cmd = YTDLPCommandBuilder.build_stream_command(
-            intent.url, format_str, audio_only=intent.audio_only, file_format=intent.file_format, use_aria2c=use_aria2c
+            intent.url,
+            format_str,
+            audio_only=intent.audio_only,
+            file_format=intent.file_format,
+            use_aria2c=use_aria2c,
+            proxy_url=intent.proxy_url,
         )
 
         try:

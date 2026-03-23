@@ -3,6 +3,7 @@ from typing import List, NamedTuple, Optional
 
 from app.config.settings import config
 from app.core.state import state
+from app.services.proxy import ProxyService
 
 
 class CompletedProcess(NamedTuple):
@@ -51,6 +52,20 @@ class YTDLPCommandBuilder:
     """Build yt-dlp commands with aria2c support"""
 
     @staticmethod
+    def _add_proxy_args(cmd: List[str], proxy_url: Optional[str] = None) -> List[str]:
+        """
+        Add proxy argument to yt-dlp command.
+        If proxy_url is explicitly provided, use it.
+        Otherwise, pick a random proxy from the configured list (if enabled).
+        """
+        url = proxy_url
+        if url is None and ProxyService.is_enabled():
+            url = ProxyService.get_random()
+        if url:
+            cmd.extend(["--proxy", url])
+        return cmd
+
+    @staticmethod
     def _add_aria2c_args(cmd: List[str]) -> List[str]:
         """
         Add aria2c external downloader arguments for faster downloads
@@ -67,7 +82,7 @@ class YTDLPCommandBuilder:
         return cmd
 
     @staticmethod
-    def build_info_command(url: str) -> List[str]:
+    def build_info_command(url: str, proxy_url: Optional[str] = None) -> List[str]:
         """Build command for fetching video info"""
         cmd = [
             "yt-dlp",
@@ -85,12 +100,13 @@ class YTDLPCommandBuilder:
         if state.js_runtime:
             cmd.extend(["--js-runtimes", state.js_runtime])
 
+        cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
         cmd.append(url)
 
         return cmd
 
     @staticmethod
-    def build_filename_command(url: str, format_str: str) -> List[str]:
+    def build_filename_command(url: str, format_str: str, proxy_url: Optional[str] = None) -> List[str]:
         """Build command for fetching filename"""
         cmd = [
             "yt-dlp",
@@ -105,16 +121,18 @@ class YTDLPCommandBuilder:
             "-f",
             format_str,
             "--no-warnings",  # Suppress warnings that might interfere
-            url,
         ]
 
         if state.js_runtime:
             cmd.extend(["--js-runtimes", state.js_runtime])
 
+        cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
+        cmd.append(url)
+
         return cmd
 
     @staticmethod
-    def build_get_url_command(url: str) -> List[str]:
+    def build_get_url_command(url: str, proxy_url: Optional[str] = None) -> List[str]:
         """Build command for fetching direct stream URL (HLS preferred)"""
         cmd = [
             "yt-dlp",
@@ -135,13 +153,19 @@ class YTDLPCommandBuilder:
         if state.js_runtime:
             cmd.extend(["--js-runtimes", state.js_runtime])
 
+        cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
         cmd.append(url)
 
         return cmd
 
     @staticmethod
     def build_stream_command(
-        url: str, format_str: str, audio_only: bool, file_format: Optional[str] = None, use_aria2c: bool = True
+        url: str,
+        format_str: str,
+        audio_only: bool,
+        file_format: Optional[str] = None,
+        use_aria2c: bool = True,
+        proxy_url: Optional[str] = None,
     ) -> List[str]:
         """
         Build command for streaming download with aria2c support
@@ -152,6 +176,7 @@ class YTDLPCommandBuilder:
             audio_only: Whether to extract audio only
             file_format: Target file format
             use_aria2c: Use aria2c for faster multi-connection downloads (default: True)
+            proxy_url: Explicit proxy URL (if None, auto-selected from config)
         """
         cmd = [
             "yt-dlp",
@@ -172,6 +197,9 @@ class YTDLPCommandBuilder:
 
         if state.js_runtime:
             cmd.extend(["--js-runtimes", state.js_runtime])
+
+        # Add proxy
+        cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
 
         # Add aria2c for faster downloads (except for stdout streaming)
         # Note: aria2c doesn't work well with stdout (-o -), so only use for file downloads
@@ -207,13 +235,14 @@ class YTDLPCommandBuilder:
         return cmd
 
     @staticmethod
-    def build_search_command(query: str, limit: int = 5) -> List[str]:
+    def build_search_command(query: str, limit: int = 5, proxy_url: Optional[str] = None) -> List[str]:
         """
         Build command for searching videos
 
         Args:
             query: Search query
             limit: Maximum number of results
+            proxy_url: Explicit proxy URL (if None, auto-selected from config)
         """
         cmd = [
             "yt-dlp",
@@ -231,5 +260,7 @@ class YTDLPCommandBuilder:
 
         if state.js_runtime:
             cmd.extend(["--js-runtimes", state.js_runtime])
+
+        cmd = YTDLPCommandBuilder._add_proxy_args(cmd, proxy_url)
 
         return cmd

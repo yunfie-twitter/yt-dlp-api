@@ -14,6 +14,7 @@ class DownloadIntent(BaseModel):
     cookies: Optional[str] = None
     audio_format: Optional[str] = None
     custom_format: Optional[str] = None
+    proxy_url: Optional[str] = None
 
 
 class MediaMetadata(BaseModel):

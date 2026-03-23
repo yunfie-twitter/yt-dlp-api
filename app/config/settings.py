@@ -37,6 +37,12 @@ class SecurityConfig(BaseModel):
     allow_localhost: bool = Field(default=False, description="Allow localhost access")
 
 
+class ProxyConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable proxy for yt-dlp requests")
+    urls: List[str] = Field(default_factory=list, description="List of proxy URLs (e.g. socks5://host:port)")
+    expose_list_endpoint: bool = Field(default=False, description="Expose /api/v1/proxies endpoint")
+
+
 class YtDlpConfig(BaseModel):
     js_runtime: Optional[str] = Field(default=None, description="JS runtime path")
     auto_detect_runtime: bool = Field(default=True, description="Auto-detect JS runtime")
@@ -71,6 +77,7 @@ class Config(BaseModel):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     ytdlp: YtDlpConfig = Field(default_factory=YtDlpConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     i18n: I18nConfig = Field(default_factory=I18nConfig)
